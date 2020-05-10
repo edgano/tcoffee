@@ -35,6 +35,11 @@ my $threadFlag4famsa;
 my $threadFlag;
 my $tcarg;
 
+my $quietENV=$ENV{QUIET_ENV};
+if($quietENV==1){$QUIET='';}
+
+my $threadENV=$ENV{thread_ENV};
+
 
 for ($a=0; $a<=$#ARGV; $a++)
   {
@@ -197,8 +202,8 @@ $CL4tc.=" $treeFlag ";
 $threadFlag=($thread)?"--thread $thread ":"--thread 1 ";
 $threadFlag4tc=($thread)?"-thread $thread ":"-thread 1 ";
 $threadFlag4famsa=($thread)?"-t $thread ":"-t 1 ";
-$CL4tc.=" $threadFlag4tc ";
-
+##$CL4tc.=" $threadFlag4tc ";
+$CL4tc.="-thread 2";
 
 my $cmethod=$method2use;
 $cmethod=~s/_pair/_msa/;
@@ -296,14 +301,15 @@ sub file2nseq
   {
     my ($f)=@_;
     my $n;
-    
-    open (F, $f) || return 0;
-    while (<F>)
-      {
-	if ($_=~/^\>/){$n++;}
-      }
-    close (F);
+    $n=`grep '>' $f | wc -l`; 
+    #open (F, $f) || return 0;
+    #while (<F>)
+    #  {
+	#if ($_=~/^\>/){$n++;}
+      #}
+    #close (F);
     return $n;
+    
   }
 sub file2abs
     {
