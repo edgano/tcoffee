@@ -833,15 +833,15 @@ int seq_reformat ( int argc, char **in_argv)
 	  }
 	else if ( in_file[0])
 	        {
-		  fprintf ( stdout, "\nFORMAT of file %s Not Supported[FATAL:%s]\n", in_file, PROGRAM);
-		myexit(EXIT_FAILURE);
+		  fprintf ( stdout, "\nFORMAT of file %s Not Supported (1)[FATAL:%s]\n", in_file, PROGRAM);
+		  myexit(EXIT_FAILURE);
 		}
-
+	
 	if ((D2=read_data_structure (in2_format, in2_file,RAD))!=NULL){if (print_format)fprintf ( stderr, "\nFILE:%s FORMAT:%s\n", in2_file, (in2_format&&in2_format[0])?in2_format:identify_seq_format(in2_file));}
 
 	else if (!D2 && in2_file[0])
 	        {
-		  fprintf ( stderr, "\nFORMAT of file %s Not Supported [FATAL:%s]\n", in2_file, PROGRAM);
+		  fprintf ( stderr, "\nFORMAT of file %s Not Supported (2)[FATAL:%s]\n", in2_file, PROGRAM);
 		  myexit(EXIT_FAILURE);
 		}
 
@@ -1282,10 +1282,13 @@ Sequence  * quick_read_seq ( char *file)
   Sequence *S=NULL;
   char *dup;
   char *tmp_file;
-  
+
   if (!file || !check_file_exists (file))return NULL;
   else if (format_is_fasta (file))
-    S=get_fasta_sequence (file, NULL);
+    {
+      S=get_fasta_sequence (file, NULL);
+    }
+  
   else if (printf_system ( "seq2name_seq.pl %s > %s",file, tmp_file=vtmpnam(NULL))==EXIT_SUCCESS)
     {
       
@@ -1547,15 +1550,26 @@ long *fasta2map(char *file)
   
   map=(long*)vcalloc (ml, sizeof (long));
   
+  
+  while ((c=fgetc(fp))!=EOF){;}
+  vfclose(fp);
+  
+  fp=vfopen(file, "r");
+  while (fgets(buf,VERY_LONG_STRING,fp));
+  
+  vfclose(fp);  
+  
+
+  fp=vfopen(file, "r");
   pos=0;
   while (fgets(buf,VERY_LONG_STRING,fp))
     {
       int d=0;
-      while ((c=buf[d++])!=0)
+      while ((c=buf[d++])!='\0')
 	{
 	  if (c=='>')
 	    {
-	      if (i<=ml){ml+=VERY_LONG_STRING; map=(long*)vrealloc (map, ml*sizeof (long));}
+	      if (i>=ml){ml+=VERY_LONG_STRING; map=(long*)vrealloc (map, ml*sizeof (long));}
 	      map[i++]=pos;
 	    }
 	  pos++;
@@ -1841,7 +1855,7 @@ char identify_format (char **fname)
        {
 	   char mode='?';
 	   mode=fname[0][0];
-
+	   
 	   if ((is_in_set (mode, "ALMSPR") && check_file_exists(fname[0]+1)) ||(mode=='X' && is_matrix ( fname[0]+1)) ||(mode=='M' && is_method(fname[0]+1)) )
 	     {
 
@@ -1989,7 +2003,50 @@ char*  seq_is_pdb_struc ( Sequence *S, int i)
   else if ( !((S->T[i])->P)){return NULL;}
   else return ((S->T[i])->P)->template_file;
 }
-char*  is_pdb_struc ( char *name)
+char*  is_pdb_struc_strict ( char *name);
+char*  is_pdb_struc ( char *iname)
+{
+  static char **name=(char**)vcalloc(10, sizeof (char*));
+  char *r=NULL;
+  int a, i;
+  
+  a=0;
+  name[a]=csprintf ( name[a], "%s", iname);a++;
+  name[a]=csprintf ( name[a], "%s.pdb", iname);a++;
+  if (getenv ("PDB_DIR"))name[a]=csprintf ( name[a], "%s/%s", getenv("PBD_DIE"),iname);a++;
+  if (getenv ("PDB_DIR"))name[a]=csprintf ( name[a], "%s/%s.pdb",getenv("PDB_DIR"),iname);a++;
+  if (get_cache_dir())name[a]=csprintf ( name[a], "%s/%s", get_cache_dir(),iname);a++;
+  if (get_cache_dir())name[a]=csprintf ( name[a], "%s/%s.pdb", get_cache_dir(),iname);a++;
+  
+  for (i=0; i<a;i++)if ((r=is_pdb_struc_strict (name[i]))!=NULL)return r;
+  add_warning(stderr, "%s Could not be used to find a PDB template",iname);
+  return r;
+}
+char*  is_pdb_struc_strict ( char *name)
+   {
+     char *r=NULL;
+     
+     if ( !name || name[0]=='\0')return NULL;
+     
+     if ((r=get_string_variable(name))!=NULL)return csprintf(NULL, "%s",r);
+          
+     if (is_pdb_file(name)){r=name;}
+     else if (is_pdb_name (name))
+       {
+	 printf_system ("extract_from_pdb -netfile \'%s\' > %s/%s 2>/dev/null",name, get_cache_dir(),name);
+	 if ( is_pdb_file(name))r=name;
+	 else r=NULL;
+	 
+       }
+
+     if (r)
+       {
+	 set_string_variable (name, r);
+	 return csprintf (NULL, "%s", r);
+       }
+     else return NULL;
+   }
+char*  is_pdb_struc_strict_old2 ( char *name)
    {
      /*Receives a name
        checks if this is the name of a local file that contains PDB data
@@ -1999,9 +2056,6 @@ char*  is_pdb_struc ( char *name)
        return NULL if everything fails
      */
 
-     static char *file_name1;
-     static char *file_name2;
-
      static char **buf_names;
      static char **buf_result;
      static int   nbuf, s;
@@ -2009,9 +2063,7 @@ char*  is_pdb_struc ( char *name)
 
      char *r=NULL;
      char command[1000];
-
-
-     
+     char *rvalue;
 
      if ( !name || name[0]=='\0')return NULL;
 
@@ -2022,8 +2074,6 @@ char*  is_pdb_struc ( char *name)
 
 	  buf_names=(char**)vcalloc ( 1000, sizeof (char*));
 	  buf_result=(char**)vcalloc ( 1000, sizeof (char*));
-	  file_name1=(char*)vcalloc ( 1000, sizeof (char));
-	  file_name2=(char*)vcalloc ( 1000, sizeof (char));
 	  max_nbuf=1000;
 	}
 
@@ -2042,22 +2092,20 @@ char*  is_pdb_struc ( char *name)
        }
      
      if ( (s=name_is_in_list ( name, buf_names,nbuf,-1))!=-1)return buf_result[s];
-
+     
 
      r=NULL;
-     sprintf ( file_name1, "%s", name);
-     sprintf ( file_name2, "%s.pdb", name);
+     
 
 
 
-     if (is_pdb_file(file_name1)){r=file_name1;}
-     else if (is_pdb_file(file_name2)){r=file_name2;}
+     if (is_pdb_file(name)){r=name;}
      else if (is_pdb_name (name))
        {
-	 printf_system ("extract_from_pdb -netfile \'%s\' > %s/%s 2>/dev/null",name, get_cache_dir(), file_name2);
-	 if ( is_pdb_file(file_name2))r=file_name2;
+	 printf_system ("extract_from_pdb -netfile \'%s\' > %s/%s 2>/dev/null",name, get_cache_dir(),name);
+	 if ( is_pdb_file(name))r=name;
 	 else r=NULL;
-
+	 
        }
     
 
@@ -2071,8 +2119,8 @@ char*  is_pdb_struc ( char *name)
        }
      else buf_result[nbuf]=NULL;
      nbuf++;
-
-     return r;
+     return r?csprintf (NULL, "%s", r):NULL;
+     
    }
 
 char *atom2pdbF (char*in)
@@ -2081,29 +2129,58 @@ char *atom2pdbF (char*in)
   printf_system ("extract_from_pdb %s > %s", in,tmp);
   return tmp;
 }
-char *fix_pdb_file ( char *in)
+char *fix_pdb_file ( char *in1)
 {
-  
+  char*in=NULL;
   char*tmp=NULL;
   
-  if ( !in || !check_file_exists (in))return NULL;
+  
+  
+  //1 - Make sure we have the proper file
+  //    The file may be in PDB_DIR, 
+  if (check_file_exists (in1))//This will get the cached name if any
+    {
+      in=csprintf (in,"%s",check_file_exists (in1));
+    }
+  else if (getenv ("PDB_DIR") && !check_file_exists (in1))//look at provided address first and THEN on PDB_DIR
+    {
+      in=csprintf (in,"%s/%s",getenv("PDB_DIR"), in1);
+      if ( check_file_exists (in));
+      else in=csprintf (in,"%s",in1);
+    }
+  else in=csprintf (in,"%s", in1);
+  
+
+  
+
+
+  if ( !in || !check_file_exists (in))
+    {
+      tmp=NULL;
+    }
   else if (!is_pdb_file(in))
     {
-      if (!pdb_has_atom(in))tmp=NULL;
+      if (!pdb_has_atom(in))
+	{
+	  add_warning ( stderr, "File %s does not contain any ATOM field [%s:WARNING]",in, PROGRAM);
+	  tmp=NULL;
+	}
       else if (is_pdb_file (tmp=atom2pdbF(in)))
-	add_warning ( stderr, "File %s is a partial PDB File - regenerated from ATOM with extract_from_pdb [%s:WARNING]\n",in, PROGRAM);
+	add_warning ( stderr, "File %s is a partial PDB File - regenerated from ATOM with extract_from_pdb [%s:WARNING]",in, PROGRAM);
+      
     }
   else if ( !seqres_equal_atom(in))
     {
       tmp=atom2pdbF(in);
       if (!is_pdb_file (tmp))return NULL;
       else
-	  add_warning ( stderr, "Could not use SEQRES field in %s -- used ATOM instead [%s:WARNING]\n",in, PROGRAM);
+	  add_warning ( stderr, "Could not use SEQRES field in %s -- used ATOM instead [%s:WARNING]",in, PROGRAM);
     }
   else
     {
       tmp=csprintf (tmp, "%s", in);
     }
+  vfree (in);
   return tmp;
 }
 
@@ -2186,6 +2263,11 @@ int pdb_has_atom ( char *name)
 	 return ispdb;
        }
 int is_pdb_file ( char *name)
+{
+  //everything except ATOM can be regenerated
+  return pdb_has_atom (name);
+}
+int is_pdb_file_old ( char *name)
        {
 	 FILE *fp;
 	 int ispdb=0;
@@ -2701,15 +2783,9 @@ int format_is_fasta_seq  ( char *file)
 
 int format_is_fasta ( char *file)
     {
-      Sequence *S;
-
-      if ( !check_file_exists(file))return 0;
-
-      if ( get_first_non_white_char (file)!='>')return 0;
-      if ( !(S=get_fasta_sequence (file, NULL)))return 0;
-      free_sequence (S, -1);
-      if ( format_is_pir(file)) return 0;
-      return 1;
+      if ( !isfile(file))return 0;
+      if ( get_first_non_white_char (file)=='>')return 1;
+      return 0;
     }
 
 int format_is_pir_aln ( char *file)
@@ -2799,6 +2875,7 @@ int format_is_saga ( char *file)
     int n_blocks;
     int n_seq;
     int a, b;
+
 
     if ( (fp=find_token_in_file (file, NULL, "SAGA"))){vfclose (fp); return 1;}
     else if  ((fp=find_token_in_file (file, NULL, "CLUSTAL"))){vfclose (fp); return 1;}
@@ -3092,7 +3169,7 @@ int main_output  (Sequence_data_struc *D1, Sequence_data_struc *D2, Sequence_dat
 
 	    if (!ns)
 	      {
-		add_warning ( stderr, "Cannot output sec_html:_E_ template file (sec. struc.) is required for this output ", PROGRAM);
+		add_warning ( stderr, "Cannot output sec_html:_E_ template file (sec. struc.) is required for this output", PROGRAM);
 	      }
 	    output_color_html  ( A, ST, out_file);
 	  }
@@ -3136,7 +3213,7 @@ int main_output  (Sequence_data_struc *D1, Sequence_data_struc *D2, Sequence_dat
 
 	    if (!ns)
 	      {
-		add_warning ( stderr, "Cannot output tm_html:_T_ template file (trans. Memb. ) is required for this output ", PROGRAM);
+		add_warning ( stderr, "Cannot output tm_html:_T_ template file (trans. Memb. ) is required for this output", PROGRAM);
 	      }
 	    output_color_html  ( A, ST, out_file);
 	  }
@@ -4618,7 +4695,7 @@ Sequence* get_pdb_sequence   (char *fname)
     }
   else
     {
-      add_warning ( stderr, "failed to extract sequence from %s [%s:WARNING]\n", fname, PROGRAM);
+      add_warning ( stderr, "failed to extract sequence from %s [%s:WARNING]", fname, PROGRAM);
       S=NULL;
     }
   return S;
@@ -5080,7 +5157,10 @@ Sequence *get_fasta_sequence (char *file, char *comment_out)
   int i, nseq,a;
   Sequence *A;
   int maxlen=0;
+
+  
   map=fasta2map(file);
+  
   nseq=read_array_size_new (map)-1;
   
   A=declare_sequence(0,0,nseq);

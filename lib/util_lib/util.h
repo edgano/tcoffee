@@ -707,6 +707,7 @@ void ignore_cache();
 int  register_file4dump (char *name, char *mode);
 char *capture_stdin ();
 int count_openF();
+void valgrind_test();
 FILE * vfopen ( char *name, char *mode);
 FILE * vfclose (FILE *fp);
 int echo ( char *string, char *fname);
@@ -749,6 +750,7 @@ int my_rmdir ( char *dir);
 
 int file_is_empty(char *fname);
 int file_exists (char *path,char *fname);
+int isfile(char *fname);
 int isexec (char *fname);
 int istmp  (char *name);
 int isdir  (char *fname);
