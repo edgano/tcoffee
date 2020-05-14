@@ -35,6 +35,9 @@ my $threadFlag4famsa;
 my $threadFlag;
 my $tcarg;
 
+my $QUIET_ENV=$ENV{QUIET_ENV};
+
+if ($QUIET_ENV==1){$QUIET="";}
 
 for ($a=0; $a<=$#ARGV; $a++)
   {
@@ -240,13 +243,11 @@ elsif (($cmethod =~/mafft/))
 	$mm=~s/1/i/;
 	$retree="--retree 1 "
       };
-    
     my_system ("$mm --anysymbol $threadFlag $treeFlag $retree $infile > $outfile $QUIET");
   }
 
 elsif ($method2use=~/famsa/)
   {
-    
     my_system ("famsa $treeFlag $threadFlag4famsa $infile $outfile >/dev/null $QUIET");
   }
 else
@@ -257,9 +258,6 @@ else
       }
     my_system ("t_coffee -in $infile -method $method2use -outfile $outfile -output fasta_aln $tcarg -quiet $QUIET");
   }
-
-
-
 
 #Flush output if none provided
 if ( ! -e $outfile)
@@ -334,7 +332,7 @@ sub get_psicl
 	if ($ENV{psitrim_4_TCOFFEE}){$cl.=" -psitrim=".$ENV{psitrim_4_TCOFFEE}." ";}
 	if ($ENV{psiJ_4_TCOFFEE}){$cl.=" -psiJ=".$ENV{psiJ_4_TCOFFEE}." ";}
 	
-
+	if ($VERBOSE){print "![dynamic.pl] --- get_psicl --- $cl\n";}
 	return $cl;
       }
       
@@ -355,6 +353,7 @@ sub get_cl4tc
 		  $cl.="-$name $val ";
 		}
 	    }
+	  if ($VERBOSE){print "![dynamic.pl] --- get_cl4tc --- $cl\n";}
 	  return $cl;
 	}
 
