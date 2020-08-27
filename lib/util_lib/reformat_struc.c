@@ -1210,6 +1210,7 @@ float atom2radius (char *t)
       lu['S'][' ']=1.808;
       lu['S']['b']=1.12;
       lu['S']['c']=1.32;
+      lu['S']['d']=1.808;
       lu['S']['e']=0.9;
       lu['S']['i']=2.2;
       lu['S']['m']=1.74;
@@ -1236,9 +1237,18 @@ float atom2radius (char *t)
   if (!b)b=' ';
   else if (b>='A' && b<='Z')b=' ';
   else if (b>='0' && b<='9')b=' ';
+  else if (b=='\'')b=' ';
 
-  if (lu[a][b]<0)printf_exit ( EXIT_FAILURE,stderr, "\nERROR: Atom [%s] is unknown[FATAL] (a=[%c] b=[%c]",t, a, b);
-  return lu[a][b];
+  if (lu[a][b]<0)
+    {
+      if (strlen (t)>=2 && lu[a][tolower(t[1])]>0)return lu[a][tolower(t[1])];
+      else
+	add_warning ( stderr, "\nWARNING: Atom [%s] is unknown Defaulf Van Der Waals Value of 1.5 Angstrom will be used",t);
+      return 1;
+    }
+  else 
+    return lu[a][b];
+
 }
     
 float atom2radius_old (char *t)

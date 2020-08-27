@@ -40,7 +40,7 @@
  *	- util_constraints_list.c
  *	- aln_convertion_util.c
  *	- util.c
- *	- reformat.c
+ *	- reformatp.c
  *	- evaluate.c
  *
  *	For datastructures, these files are interesting:
@@ -1404,7 +1404,7 @@ if ( !do_evaluate)
 			    /*Max Value*/ "any"          \
 					  );
 	       if (n_template_file)cputenv ("template_file_4_TCOFFEE=%s",template_file_list[0]);
-
+	       
 /*PARAMETER PROTOTYPE:    VERSION      */
 	       setenv_list=declare_char (100, STRING);
 	       n_setenv=get_cl_param(\
@@ -2909,7 +2909,7 @@ get_cl_param(\
 			    /*MAX Nval*/  1                ,\
 			    /*DOC*/       "Minimum similarity between a sequence and its BLAST relatives" ,\
 			    /*Parameter*/ &prot_min_sim          ,\
-			    /*Def 1*/     "40"             ,\
+			    /*Def 1*/     "0"             ,\
 			    /*Def 2*/     "20"             ,\
 			    /*Min_value*/ "any"            ,\
 			    /*Max Value*/ "any"             \
@@ -2926,7 +2926,7 @@ get_cl_param(\
 			    /*MAX Nval*/  1                ,\
 			    /*DOC*/       "Maximum similarity between a sequence and its BLAST relatives" ,\
 			    /*Parameter*/ &prot_max_sim          ,\
-			    /*Def 1*/     "90"             ,\
+			    /*Def 1*/     "100"             ,\
 			    /*Def 2*/     "50"             ,\
 			    /*Min_value*/ "any"            ,\
 			    /*Max Value*/ "any"             \
@@ -2944,13 +2944,15 @@ get_cl_param(							\
 			    /*MAX Nval*/  1             ,\
 			    /*DOC*/       "Defines the number of iteration of psiblast (-j)",\
 			    /*Parameter*/&psiJ       ,\
-			    /*Def 1*/    "1"      ,\
-			    /*Def 2*/    "1",\
+			    /*Def 1*/    "3"      ,\
+			    /*Def 2*/    "3",\
 			    /*Min_value*/ "any"         ,\
 			    /*Max Value*/ "any"          \
 		   );
  
 cputenv ("psiJ_4_TCOFFEE=%d", psiJ);
+cputenv ("num_iterations_4_TCOFFEE=%d", psiJ);
+
 declare_name (psitrim_mode);
 get_cl_param(							\
 			    /*argc*/      argc          ,\
@@ -3021,7 +3023,7 @@ get_cl_param(\
 			    /*MAX Nval*/  1                ,\
 			    /*DOC*/       "Minimum coverage of a sequence by its BLAST relatives" ,\
 			    /*Parameter*/ &prot_min_cov          ,\
-			    /*Def 1*/     "40"             ,\
+			    /*Def 1*/     "90"             ,\
 			    /*Def 2*/     "0"             ,\
 			    /*Min_value*/ "any"            ,\
 			    /*Max Value*/ "any"             \
@@ -3180,7 +3182,6 @@ declare_name (prot_blast_server);
  set_string_variable ("pdb_db", pdb_db);
  cputenv ("pdb_db_4_TCOFFEE=%s",pdb_db);
 
-
 declare_name (prot_db);
  get_cl_param(\
 			    /*argc*/      argc          ,\
@@ -3200,8 +3201,10 @@ declare_name (prot_db);
 		   );
  if ( strm (prot_db, "env"))prot_db=get_env_variable ("protein_db_4_TCOFFEE", IS_FATAL);
  set_string_variable ("prot_db", prot_db);
- cputenv ("protein_db_4_TCOFFEE=%s",pdb_db);
-
+ cputenv ("protein_db_4_TCOFFEE=%s",prot_db);
+ 
+ 
+ 
  declare_name (method_log);
  get_cl_param(							\
 			    /*argc*/      argc          ,\
@@ -3775,7 +3778,7 @@ get_cl_param(\
 	       else n_core=MAX3(n_core, max_n_proc,n_thread);
 	       set_int_variable ("n_core",n_core);
 	       set_nproc (n_core);
-	       
+	       cputenv ("thread_4_TCOFFEE=%d", get_nproc());
 	       
 	       
 
@@ -4830,6 +4833,19 @@ get_cl_param(\
 	        *
 	        * \sa ::Template for more information on how templates are stored within T-Coffee.
 	        */
+
+	       if (name_is_in_list("BLAST",template_file_list, n_template_file,-1)!=-1  && strstr ("LOCAL", prot_blast_server))
+		 {
+		   cputenv ("db_4_BLAST=%s", prot_db);
+		   cputenv ("num_iterations_4_BLAST=%d", psiJ);
+		   cputenv ("outdir_4_BLAST=%d", get_cache_dir());
+		   cputenv ("thread_4_BLAST=%d",get_nproc());
+		   
+		   fprintf ( le, "\nPrecompute the Blasts -- Use Cache if available\n");
+		   seq2blast (S);
+		 }
+		     
+		     
 	       if ( n_template_file)
 		 {
 		   fprintf ( le, "\nLooking For Sequence Templates:\n");
@@ -5045,8 +5061,8 @@ get_cl_param(\
 		     CL=read_n_constraint_list (list_file,n_list,NULL, mem_mode,weight,type, le, CL, seq_source);
 		     }
 		 }
-	       //This very importnat step insures the CL is symetrical
-	       //This is essential for the remaioning computation
+	       //This very important step insures the CL is symetrical
+	       //This is essential for the remaining computation
 	       //It should not be done before because some methods may not be symetrical for specific reasons
 	       //And the CL may be used in different contexts
 	       CL=CL2simCL (CL);
@@ -5753,9 +5769,11 @@ get_cl_param(\
 		      }
 		}
 
+
 	      if (remove_template_file){S=vremove_seq_template_files(S);}
 	      else
 		{
+		  
 		  S=display_seq_template_files (S);
 		}
 	      
@@ -7098,6 +7116,7 @@ Alignment * t_coffee_dpa (int argc, char **argv)
   char *command;
   char *run_name=NULL;
   Fname *F=NULL;
+  char *cache=NULL;
   float *w;
   int a;
   int output_dpa_tree=1;
@@ -7240,6 +7259,10 @@ Alignment * t_coffee_dpa (int argc, char **argv)
 	{
 	  dpa_aligner=argv[++a];
 	}
+      else if (strm (argv[a], "-cache"))
+	{
+	  cache=argv[++a];
+	}
       else if (strm (argv[a],"-in") || strm (argv[a],"-infile"))
 	{
 	  myexit (fprintf_error (stderr, "%s is not supported when using -dpa [FATAL:%s]", argv[a],PROGRAM));
@@ -7304,7 +7327,12 @@ Alignment * t_coffee_dpa (int argc, char **argv)
   set_int_variable ("reg_dynamic",reg_dynamic);
   set_int_variable ("reg_pool",reg_pool);
   
-
+  //Set the cache
+  if (!cache)cache=csprintf (NULL,"use");
+  prepare_cache (cache);
+  cputenv ("cache_4_TCOFFEE=%s", get_cache_4_tcoffee());
+  cputenv ("cache_4_CLTCOFFEE=%s", get_cache_4_tcoffee());
+  
   //prepare the aligner CL
   if (dpa_aligner)
     {
@@ -7349,7 +7377,7 @@ Alignment * t_coffee_dpa (int argc, char **argv)
       if (S->nseq>10000)dpa_nseq=1000;
       else dpa_nseq=MAX((S->nseq/10),2);
     }
-  
+  fprintf ( stdout, "PROGRAM: %s %s (%s) -- regressive mode\n",PROGRAM,VERSION,BUILD_INFO);
   fprintf ( le, "!Maximum N Threads --- %d\n",get_nproc());
   //prepare the guide tree
   fprintf ( le, "!Compute Guide Tree --- ");

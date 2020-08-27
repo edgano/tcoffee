@@ -111,6 +111,11 @@ if ($mode eq "seq_msa")
   {
     &seq2msa($mode,&my_get_opt ( $cl, "-infile=",1,1, "-method=",1,2, "-param=",0,0,"-outfile=",1,0, "-database=",0,0));
   }
+elsif ($mode eq "blast2prf")
+  {
+
+    blast2prf (&my_get_opt ( $cl, "-infile=",0,0,"-seqfile=",0,0,"-outfile=",0,0));
+  }
 elsif ( $mode eq "tblastx_msa")
   {
     &seq2tblastx_lib ($mode,&my_get_opt ( $cl, "-infile=",1,1, "-outfile=",1,0));
@@ -1836,11 +1841,22 @@ sub is_valid_blast_xml
     }
 sub file2blast_flavor
       {
-	my $file=shift;
+	my $file=shift; 
 	if (&file_contains ($file,"EBIApplicationResult",100)){return "EBI";}
 	elsif (&file_contains ($file,"NCBI_BlastOutput",100)){return "NCBI";}
 	else {return "UNKNOWN";}
       }
+sub blast2prf
+	{
+	  my ($blastF, $seqF,$outfile)=@_;
+	  my (%s, %profile);
+	  my ($result,$psiblast_output,$profile_name,@profiles);
+	  %s=read_fasta_seq_index ($seqF);
+	  my ($z1,$z1m)=uncompress($blastF);
+	  %profile=blast_xml2profile($s{0}{name}, $s{0}{seq},$maxid, $minid,$mincov,$blastF);
+	  output_profile ($outfile, \%profile, $trim);
+	  compress($z1,$z1m);
+	}
 sub blast_xml2profile
   {
     my ($name,$seq,$maxid, $minid, $mincov, $file)=(@_);
@@ -2064,17 +2080,16 @@ sub ncbi_blast_xml2profile
     my ($name,$seq,$maxid, $minid, $mincov, $string)=(@_);
     my ($L,$l, $a,$b,$c,$d,$nhits,@identifyerL);
 
-
     $seq=~s/[^a-zA-Z]//g;
     $L=length ($seq);
-
+    
     #This is causing the NCBI parser to fail when Iteration_query-def is missing
     #%query=&xml2tag_list ($string, "Iteration_query-def");
     #$name=$query{0}{body};
 
     %hit=&xml2tag_list ($string, "Hit");
 
-
+    
     for ($nhits=0,$a=0; $a<$hit{n}; $a++)
       {
 	my ($ldb,$id, $identity, $expectation, $start, $end, $coverage, $r);
@@ -2119,8 +2134,10 @@ sub ncbi_blast_xml2profile
 		$Hend=$HEND{$e}{body};
 
 		$coverage=($L)?(($end-$start)*100)/$L:0;
-
-		if ($identity>$maxid || $identity<$minid || $coverage<$mincov){next;}
+		if ($identity>$maxid || $identity<$minid || $coverage<$mincov)
+		  {
+		    next;
+		  }
 		@lr1=(split (//,$qs));
 		@lr2=(split (//,$ms));
 		$l=$#lr1+1;
@@ -2765,14 +2782,10 @@ sub cache_file
 	$db=~/([^\/]+)$/;
 	$db=$1;
       }
-    $cache_file_sh="$name.$method.$db.$server.$it.tmp";
-    $cache_file="$CACHE/$name.$method.$db.$server.$it.tmp";
 
-    if ($infile ne "")
-      {
-	$cache_file_infile_sh="$name.$method.$db.$server.$it.infile.tmp";
-	$cache_file_infile="$CACHE/$name.$method.$db.$server.$it.infile.tmp";
-      }
+    $cache_file="$CACHE/$name.$method.$db.$server.$it.tmp";
+    #print "Look for $cache_file [$cache_mode][$CACHE] \n";
+    if ($infile ne ""){$cache_file_infile="$CACHE/$name.$method.$db.$server.$it.infile.tmp";}
 
     if ($cache_mode eq "GET")
       {
@@ -2784,10 +2797,16 @@ sub cache_file
 	  }
 	else
 	  {
+	    my ($z1,$z1m)=uncompress($cache_file_infile);
+	    my ($z2,$z2m)=uncompress($cache_file);
+	    
 	    if ( -e $cache_file && &fasta_file1_eq_fasta_file2($infile,$cache_file_infile)==1)
 	      {
 		`cp $cache_file $outfile`;
 		$CACHE_STATUS="READ CACHE";
+		compress($z1,$z1m);
+		compress($z2,$z2m);
+		
 		return 1;
 	      }
 	  }
@@ -2804,10 +2823,6 @@ sub cache_file
 	  {
 	    `cp $outfile $cache_file`;
 	    if ($cache_file_infile ne ""){ `cp $infile $cache_file_infile`;}
-
-	    #functions for updating the cache
-	    #`t_coffee -other_pg clean_cache.pl -file $cache_file_sh -dir $CACHE`;
-	    #`t_coffee -other_pg clean_cache.pl -file $cache_file_infile_sh -dir $CACHE`;
 	    return 1;
 	  }
       }
@@ -2862,13 +2877,17 @@ sub fasta_file1_eq_fasta_file2
 
     foreach $n (keys(%s1))
       {
-	if ($s1{$n}{seq} ne $s2{$n}{seq}){return 0;}
+	my $ss1=lc($s1{$n}{seq});
+	my $ss2=lc($s2{$n}{seq});
+	if ($ss1 ne $ss2){return 0;}
       }
-
     foreach $n (keys(%s2))
       {
-	if ($s1{$n}{seq} ne $s2{$n}{seq}){return 0;}
+	my $ss1=lc($s1{$n}{seq});
+	my $ss2=lc($s2{$n}{seq});
+	if ($ss1 ne $ss2){return 0;}
       }
+    
     return 1;
   }
 
@@ -3716,3 +3735,30 @@ sub fasta2nseq
 	  return $nseq;
 	}
 	
+sub compress
+	  {
+	    my ($f, $mode)=@_;
+	    if    ($mode eq "gz"){system ("gzip $f");}
+	    elsif ($mode eq "zip" ){system ("zip $f");}
+	    return;
+	  }
+sub uncompress 
+	  {
+	    my $f=@_[0];
+	    if ( -e $f) {return "";}
+
+	    my $gz=$f.".gz";
+	    if ( -e $gz)
+	      {
+		system ("gunzip $gz");
+		return ($f, "gz");
+	      }
+	    my $gz=$f.".zip";
+	    
+	    if ( -e $gz)
+	      {
+		system ("unzip $gz");
+		return ($f, "zip");
+	      }
+	    return "";
+	  }

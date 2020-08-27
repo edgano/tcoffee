@@ -87,6 +87,8 @@ char *array2alphabet (char **array, int n, char *forbiden);
 
 
 
+
+
 //TM Predictions
 char* alnpos2hmmtop_pred (Alignment *A, Alignment *Pred, int pos, int mode);
 Alignment * aln2hmmtop_pred (Alignment *A);
@@ -94,7 +96,11 @@ char * seq2tmstruc ( char *seq);
 
 void set_blast_default_values();
 char      *  seq2pdb   ( Sequence *S);
-Alignment *  seq2blast ( Sequence *S);
+Sequence *  seq2prf ( Sequence *S);
+char* clean_sname(char sname);
+Sequence *  seq2blast ( Sequence *S);
+Sequence *  seq2blast_thread ( Sequence *S);
+
 
 Sequence * seq2unique_name_seq ( Sequence *S);
 Alignment * aln2unique_name_aln ( Alignment *S);

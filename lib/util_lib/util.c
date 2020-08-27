@@ -4124,7 +4124,7 @@ int get_longest_string (char **array,int n, int *len, int *index)
      {
      int a, l;
      int max_len=0, max_index=0;
-
+     if (!array) return 0;
      if ( n==0 || array==NULL )return 0;
      if ( n==-1)n=read_size_char(array,sizeof (char*));
 
@@ -4140,7 +4140,7 @@ int get_longest_string (char **array,int n, int *len, int *index)
 	 max_index=0;
 	 for ( a=1; a< n; a++)
 	     {
-	     l=strlen ( array[a]);
+	       l=(array[a])?strlen ( array[a]):0;
 	     if ( l>max_len)
 	        {
 		max_len=l;
@@ -4468,6 +4468,7 @@ int printf_file  (char *file,char *mode, char *string,...)
   vfclose (fp);
   return 1;
   }
+
 int printf_system_direct_check  (char *string, ...)
 {
   char *buf;
@@ -4512,6 +4513,28 @@ int printf_system_direct  (char *string, ...)
   r=system (buf);
   vfree(buf);
   return r;
+}
+
+char* printf_system2string  (char *string, ...)
+{
+  char *buf;
+  char *result;
+  char *tmpF=vtmpnam(NULL);
+  
+  if (!string) return NULL;
+  
+  cvsprintf (buf, string);
+  printf_system ("%s >%s", buf,tmpF);
+  vfree (buf);
+  if (!isfile(tmpF))result=NULL;
+  else
+    {
+      
+      result=file2string(tmpF);
+      vremove (tmpF);
+    }
+  
+  return result;
 }
 
 int printf_system  (char *string, ...)
@@ -6702,6 +6725,7 @@ int set_email (char *email)
 char *chomp (char *name)
 {
   int a=0;
+  if (!name) return name;
   while ( name[a]!='\n' && name[a]!='\0')a++;
   name[a]='\0';
   return name;
@@ -6979,6 +7003,12 @@ char *vremove2 (char *s)
   char ***list;
   int a;
 
+  if (!s) return NULL;
+  else 
+    {
+      add_warning ( stderr, "cautiously refusing to remove file with wildcard: [%s] [%s:WARNING]\n", s,PROGRAM);
+      return NULL;
+    }
 
   //Remove filenames with a wildcard
 
@@ -7019,7 +7049,7 @@ char *vremove3(char *s, char *ext)
 }
 char *vremove (char *s)
 {
-
+  if (s && getenv ("DEBUG_VREMOVE"))HERE ("!--- DEBUG VREMOVE::Remove %s", s);
 
   if (!s)return NULL;
   else if ( s && strstr (s, "*"))return vremove2(s);
@@ -7061,7 +7091,7 @@ FILE *NFP;/*Null file pointer: should only be open once*/
 /*                                                                   */
 /*                         CACHE_FUNCTION                            */
 /*                                                                   */
-/*                                                                   */
+/*                                                                     */
 /*********************************************************************/
 static char *cache;
 char * prepare_cache ( const char *mode)
@@ -7070,14 +7100,13 @@ char * prepare_cache ( const char *mode)
 
   if (strm (mode, "use"))
     {
-      sprintf (cache, "%s",get_cache_4_tcoffee());
+      cache=csprintf (cache, "%s",get_cache_4_tcoffee());
     }
 
   else if ( strm (mode, "ignore") ||  strm (mode, "no"))
     {
-
-      cache=vtmpnam(cache);
-      strcat (cache, "/");
+      
+      cache=csprintf ("%s/",vtmpnam(cache));
       printf_system_direct ("mkdir %s",cache);
 
     }
@@ -7089,15 +7118,16 @@ char * prepare_cache ( const char *mode)
     }
   else if ( strm (mode, "local"))
     {
-      cache[0]='\0';
+      cache=csprintf ( cache, "./");
     }
   else
     {
-      sprintf ( cache, "%s/",mode);
+      if (mode[0]!='/')cache=csprintf (cache, "%s/%s/",get_pwd(NULL),mode);
+      else cache=csprintf (cache, "%s/", mode);
       my_mkdir ( cache);
     }
+  cputenv ("cache_4_TCOFFEE=%s", cache);
   return cache;
-
 }
 
 char * get_cache_dir()

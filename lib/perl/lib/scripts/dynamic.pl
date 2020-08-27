@@ -36,6 +36,9 @@ my $threadFlag4famsa;
 my $threadFlag;
 my $tcarg;
 
+my $QUIET_ENV=$ENV{QUIET_ENV};
+
+if ($QUIET_ENV==1){$QUIET="";}
 
 for ($a=0; $a<=$#ARGV; $a++)
   {
@@ -43,7 +46,7 @@ for ($a=0; $a<=$#ARGV; $a++)
     elsif ($ARGV[$a] eq "-outfile"){$outfile=file2abs($ARGV[++$a], "new");}
     elsif ($ARGV[$a] eq "-dynamic_config"){
     	$dynamic=file2abs($ARGV[++$a]);
-    	if ($VERBOSE){print "![dynamic.pl] --- -dynamic_config flag if/else--- $dynamic\n";}
+    	if ($VERBOSE){print "\n![dynamic.pl] --- -dynamic_config flag if/else--- $dynamic\n";}
 	}
     
     elsif ($ARGV[$a] eq "-tree") {$tree=$ARGV[++$a];}
@@ -128,16 +131,16 @@ else
   {
     if (-e $dynamic)
       {
-       if ($VERBOSE){print "![dynamic.pl] --- -dynamic_config FILE: \n";}
+       if ($VERBOSE){print "\n![dynamic.pl] --- -dynamic_config FILE: \n";}
         my @dynamicFile;
 	open (F, $dynamic);
 	while (<F>)
 	  {
 	    my $f=$_;
-	    if ($VERBOSE){print "![dynamic.pl] --- FILE content: $f\n";}
+	    if ($VERBOSE){print "\n![dynamic.pl] --- FILE content: $f\n";}
 	    ## $f=~/(\W)+ (\d)+/;
 	    @dynamicFile = split ' ', $f;
-	    if ($VERBOSE){print "![dynamic.pl] --- -dynamic_config --- $dynamicFile[0] :: $dynamicFile[1]\n";}
+	    if ($VERBOSE){print "\n![dynamic.pl] --- -dynamic_config --- $dynamicFile[0] :: $dynamicFile[1]\n";}
 	    $method{$dynamicFile[0]} = $dynamicFile[1];
 	  }
 	close(F);
@@ -217,10 +220,13 @@ $threadFlag4tc=($thread)?"-thread $thread ":"-thread 1 ";
 $threadFlag4famsa=($thread)?"-t $thread ":"-t 1 ";
 $CL4tc.=" $threadFlag4tc ";
 
+print "\n![dynamic.pl] --- CL4tc == $CL4tc\n";  
 
 my $cmethod=$method2use;
 $cmethod=~s/_pair/_msa/;
 $cmethod=~s/_msa//;
+
+print "\n![dynamic.pl] --- cmethod == $cmethod\n";  
 
 if ($cmethod eq "tcoffee"|| $cmethod eq "t_coffee" )
   {
@@ -264,8 +270,14 @@ elsif (($cmethod =~/mafft/))
 
 elsif ($method2use=~/famsa/)
   {
-    
+    print "\n![dynamic.pl] --- FAMSA DEFAULT\n";    
     my_system ("famsa $treeFlag $threadFlag4famsa $infile $outfile >/dev/null $QUIET");
+  }
+elsif ($method2use=~/famsaUpgma/)
+  {
+    print "\n![dynamic.pl] --- FAMSA Upgma\n";
+    print "\n![dynamic.pl] --- Command: famsa -gt upgma $treeFlag $threadFlag4famsa $infile $outfile >/dev/null $QUIET\n";
+    my_system ("famsa -gt upgma $treeFlag $threadFlag4famsa $infile $outfile >/dev/null $QUIET");
   }
 else
   {
@@ -275,9 +287,6 @@ else
       }
     my_system ("t_coffee -in $infile -method $method2use -outfile $outfile -output fasta_aln $tcarg -quiet $QUIET");
   }
-
-
-
 
 #Flush output if none provided
 if ( ! -e $outfile)
@@ -307,7 +316,6 @@ if ($VERBOSE!=-1)
   }
 
 my_exit ($CDIR,$EXIT_SUCCESS);
-
 
 
 sub file2nseq
@@ -373,6 +381,7 @@ sub get_cl4tc
 		  $cl.="-$name $val ";
 		}
 	    }
+	  if ($VERBOSE){print "\n![dynamic.pl] --- get_psicl --- $cl\n";}
 	  return $cl;
 	}
 
@@ -393,15 +402,15 @@ sub my_exit
       my $a;
       if ($VERBOSE)
 	{
-	  print "![dynamic.pl] --- CDIR: $CDIR\n";
-	  print "![dynamic.pl] --- Processed $NSEQ\n";
-	  print "![dynamic.pl] --- ";
+	  print "\n![dynamic.pl] --- CDIR: $CDIR\n";
+	  print "\n![dynamic.pl] --- Processed $NSEQ\n";
+	  print "\n![dynamic.pl] --- ";
 	  foreach my $arg (@ARGV)
 	    {
 	      print "$arg ";
 	    }
-	  print ("\n");
-	  print "![dynamic.pl] --- EXIT: $ec ($EXIT_SUCCESS:success, $EXIT_FAILURE:failure)-- Verbose mode -- unset VERBOSE_4_DYNAMIC to turn verbose mode off\n";
+	  
+	  print "\n![dynamic.pl] --- EXIT: $ec ($EXIT_SUCCESS:success, $EXIT_FAILURE:failure)-- Verbose mode -- unset VERBOSE_4_DYNAMIC to turn verbose mode off\n";
 	}
       chdir ($dir);
       exit ($ec);
@@ -412,7 +421,7 @@ sub my_system
     my ($com)=@_;
     $LAST_COM=$com;
     
-    if ($VERBOSE){print "![dynamic.pl] --- SysCall --- $com\n";}
+    if ($VERBOSE){print "\n![dynamic.pl] --- SysCall --- $com\n";}
     
     system ($com);
   }

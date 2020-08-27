@@ -9,6 +9,8 @@
 #include "dp_lib_header.h"
 #include "define_header.h"
 
+
+
 /**
  * \file aln_convertion_util.c
  * Contains several auxiliary functions for alignments and templates.
@@ -1683,7 +1685,7 @@ void set_blast_default_values()
 {
   set_string_variable ("blast_server", const_cast<char*>( (getenv ("blast_server_4_TCOFFEE"))?getenv ("blast_server_4_TCOFFEE"):"EBI") );
   set_string_variable ("pdb_db", const_cast<char*>( (getenv ("pdb_db_4_TCOFFEE"))?getenv ("pdb_db_4_TCOFFEE"):"pdb") );
-  set_string_variable ("prot_db", const_cast<char*>( (getenv ("prot_db_4_TCOFFEE"))?getenv ("prot_db_4_TCOFFEE"):"uniprot") );
+  set_string_variable ("prot_db", const_cast<char*>( (getenv ("protein_db_4_TCOFFEE"))?getenv ("protein_db_4_TCOFFEE"):"uniprot") );
 				  //Maria added this to cast a const char* to char*
   set_int_variable ("prot_min_sim", 0);
   set_int_variable ("prot_max_sim", 100);
@@ -1708,35 +1710,349 @@ char * seq2pdb   (Sequence *S)
   return seq2P_pdb_id(S,0);
 }
 
-Alignment * seq2blast ( Sequence *S)
+char* clean_sname     ( char *in)
 {
-  Alignment *A;
-  set_blast_default_values();
-
-  if (S->nseq==1)
+  int l=0;
+  while (in && in[l])
     {
-      S=seq2template_seq (S, "BLAST", NULL);
-      A=seq2R_template_profile(S,0);
-      sprintf ( A->name[0], "%s", S->name[0]);
+      char c=in[l];
+      if (!(isalnum(c) || c=='.' || c=='_'))in[l]='_';
+      l++;
+    } 
+  return in;
+}
+Sequence * seq2blast ( Sequence *S)
+{
+  int thread=0;
+  int   *pid_list;
+  char **pid_tmpfile;
+  char **blist;
+  int pid, npid, njob, max_nproc,a;
+  int max=max_n_pid();
+  int nseq,nseq2, nnseq;
+  int i, b;
+  FILE *fp;
+  char *db=NULL;
+  char *dbn=NULL;
+  char *outdir=NULL;
+  int num_iterations, outfmt;
+  int compress;
+  char *in=NULL;
+  char *inz=NULL;
+  char *sname=NULL;
+  
+  if (!S->blastfile)S->blastfile=(char**)vcalloc (S->nseq, sizeof (char*));
+  max_nproc=max*2;
+  if (getenv("thread_4_TCOFFEE"))thread=atoi(getenv("thread_4_TCOFFEE"));
+  else thread=1;
+  
+  nnseq=MAX((S->nseq/thread),1);
+  pid_tmpfile=(char**)vcalloc (max_nproc+1, sizeof (char*));
+  pid_list   =(int *)vcalloc (max_nproc, sizeof (int *));
+  blist=(char**)vcalloc (max_nproc+1, sizeof (char*));;
+  npid=0;
+  nseq=0;
+  
+  
+  if (getenv("protein_db_4_TCOFFEE"))db=csprintf (db, "%s", getenv("protein_db_4_TCOFFEE"));
+  if (!getenv("protein_db_4_TCOFFEE"))myexit(fprintf_error (stderr,"Database has not been set for Blast"));
+  if (!isfile(db))myexit(fprintf_error (stderr,"Database %s not available",db));
+  dbn=path2filename(db);
+  
+  if (getenv("num_iterations_4_TCOFFEE"))num_iterations=atoi(getenv("num_iterations_4_TCOFFEE"));
+  else num_iterations=1;
+  
+  if (getenv("outfmt_4_TCOFFEE"))outfmt=atoi(getenv("outfmt_4_TCOFFEE"));
+  else outfmt=5;
+  
+  if (getenv("cache_4_TCOFFEE"))
+    {
+      outdir=csprintf (outdir, "%s", getenv("cache_4_TCOFFEE"));
+      if (outdir[0]!='/')outdir=csprintf (outdir, "./%s", getenv("cache_4_TCOFFEE"));
     }
-  else
+  else  outdir=csprintf (outdir, "./");
+  my_mkdir (outdir);
+      
+  if (getenv("compress_4_TCOFFEE"))compress=1;
+  else compress=0;
+
+  fprintf ( stderr, "\n!Run Blast in batch -- db: %s number_iterations: %d outdir: %s outfmt: %d compression: %s\n", db, num_iterations, outdir, outfmt, (compress)?"yes":"no"); 
+  for (b=0,a=0; a<S->nseq; a++)
     {
-      int a;
-      for (a=0; a< S->nseq; a++)
+      sname=clean_sname(csprintf (sname, "%s", S->name[a]));
+      in=csprintf (in,"%s/%s.blastp.%s.LOCAL.%d.tmp", outdir,sname,dbn,num_iterations);
+      inz=csprintf (inz, "%s.gz", in);
+      
+      if ( isfile (in) || isfile (inz))
 	{
-	  Sequence *NS;
-	  char name[1000];
-	  NS=fill_sequence_struc(1, &(S->seq[a]), &(S->name[a]), NULL);
-	  NS=seq2template_seq (NS, "BLAST", NULL);
-	  A=seq2R_template_profile(NS,0);
-	  sprintf ( name, "%s.prf", S->name[a]);
-
-	  output_fasta_aln (name,A);
-	  fprintf (stdout, "\nOUTPUT %s\n", name);
+	  fprintf ( stderr, "!\tLOOKUP BLAST %s vs %s\n", S->name[a], dbn); 
+	  b++;
 	}
-      myexit (EXIT_SUCCESS);
+      else 
+	{
+	  fprintf ( stderr, "!\tCOMPUTE BLAST %s vs %s\n", S->name[a], dbn); 
+	}
     }
-  return A;
+  
+    
+
+  npid=0;
+  while (nseq<S->nseq)
+    {
+      int nseq2;
+      char *tmp=vtmpnam (NULL);
+      
+      blist[npid]=vtmpnam (NULL);
+      FILE *fp=vfopen  (tmp, "w");
+      for (nseq2=0,a=0; a<nnseq && nseq<S->nseq; a++, nseq++, nseq2++)
+	{
+	  
+	  fprintf ( fp, ">%s\n%s\n", S->name[nseq], S->seq[nseq]);
+	}
+     
+      vfclose (fp);
+      pid=vvfork(NULL);
+      if ( pid==0)
+	{
+	  int b;
+	  initiate_vtmpnam(NULL);
+	  vfclose(vfopen (pid_tmpfile[a],"w"));
+	  S=seq2blast_thread(get_fasta_sequence (tmp, NULL));
+	  fp=vfopen (blist[npid], "w");
+	  for (b=0; b<nseq2; b++)
+	      fprintf (fp,">%s %s\n%s\n", S->name[b], S->blastfile[b], S->seq[b]);
+	  vfclose (fp);
+
+	  myexit (EXIT_SUCCESS);
+	}
+      else
+	{
+	  pid_list[pid]=npid;
+	  npid++;
+	}
+      
+    }
+  for (a=0; a<npid; a++)
+    {
+      pid=vwait(NULL);
+      vremove(pid_tmpfile[pid_list[pid]]);
+    }
+  for (a=0; a<npid; a++)
+    {
+      int b;
+      Sequence *S2=get_fasta_sequence (blist[a], NULL);
+      for (b=0; b<S2->nseq; b++)
+	{
+	  
+	  if ((i=name_is_in_hlist (S2->name[b], S->name,-1))!=-1)
+	    {
+	      S->blastfile[i]=csprintf (S->blastfile[i], "%s", S2->seq_comment[b]);
+	      S->seq_comment[i] =strcatf (S->seq_comment[i], " _BLAST_ %s", S2->seq_comment[b]);
+	      S->aln_comment[i] =strcatf (S->aln_comment[i], " _BLAST_ %s", S2->seq_comment[b]);
+	    }
+
+	}
+      free_sequence(S2, -1);
+    }
+  
+  vfree (pid_list);
+  free_char (pid_tmpfile, -1);
+  return S;
+}
+  
+Sequence * seq2blast_thread (Sequence *S)
+{
+  char *db=NULL;
+  char *dbn=NULL;
+  int num_iterations=1;
+  int outfmt=5;
+  char *FullBlastF=vtmpnam (NULL);
+  char *FullSeqF=vtmpnam (NULL);
+  char *sname=NULL;
+  char *outdir=NULL;
+  char *buf=NULL;
+  FILE *fp;
+  FILE *out;
+  char *header=NULL;
+  char *lheader=NULL;
+  char *ilen=NULL;
+  char *olen=NULL;
+  char *in=NULL;
+  char *inz=NULL;
+  int  *dolist;
+  char *footer=NULL;
+  int a,b;
+  int compress=0;
+  
+  free_char (S->file, -1);
+  S->file=(char**)vcalloc (S->nseq, sizeof (char*));
+
+  free_char (S->blastfile, -1);
+  S->blastfile=(char**)vcalloc (S->nseq, sizeof (char*));
+  
+  if (getenv("protein_db_4_TCOFFEE"))db=csprintf (db, "%s", getenv("protein_db_4_TCOFFEE"));
+  if (!getenv("protein_db_4_TCOFFEE"))myexit(fprintf_error (stderr,"Database has not been set for Blast"));
+  if (!isfile(db))myexit(fprintf_error (stderr,"Database %s not available",db));
+  dbn=path2filename(db);
+  
+  if (getenv("num_iterations_4_TCOFFEE"))num_iterations=atoi(getenv("num_iterations_4_TCOFFEE"));
+  else num_iterations=1;
+  
+  if (getenv("outfmt_4_TCOFFEE"))outfmt=atoi(getenv("outfmt_4_TCOFFEE"));
+  else outfmt=5;
+  
+  if (getenv("cache_4_TCOFFEE"))
+    {
+      outdir=csprintf (outdir, "%s", getenv("cache_4_TCOFFEE"));
+      if (outdir[0]!='/')outdir=csprintf (outdir, "./%s", getenv("cache_4_TCOFFEE"));
+    }
+  else  outdir=csprintf (outdir, "./");
+  my_mkdir (outdir);
+      
+  if (getenv("compress_4_TCOFFEE"))compress=1;
+  else compress=0;
+  
+  dolist=(int*)vcalloc ( S->nseq, sizeof (int));
+  
+  for ( b=0,a=0; a<S->nseq; a++)
+    {
+      char *in;
+      sname=clean_sname(csprintf (sname, "%s", S->name[a]));
+      S->file[a]=csprintf (S->file[a],"%s/%s.blastp.%s.LOCAL.%d.infile.tmp", outdir,sname,dbn,num_iterations);
+      in=S->blastfile[a]=csprintf (S->blastfile[a],"%s/%s.blastp.%s.LOCAL.%d.tmp", outdir,sname,dbn,num_iterations);
+      inz=csprintf (inz, "%s.gz",in);
+
+      if ( isfile (in) || isfile (inz))
+	{
+	  dolist[a]=0;
+	}
+      else 
+	{
+	  dolist[a]=1;
+	  b++;
+	}
+    }
+  
+  if (!b)
+    {
+      vfree (db);vfree(dbn);vfree(sname);vfree(outdir);
+      vfree(buf); 
+      vfree(header);vfree(lheader); vfree(ilen);vfree (olen);vfree(in); vfree(inz);
+      vfree(dolist );vfree(footer );
+      return S;
+    }
+
+  fp=vfopen ( FullSeqF, "w");
+  for ( a=0; a<S->nseq; a++)
+    {
+      if (dolist[a])
+	{
+	  fprintf ( fp, ">%s\n%s\n", S->name[a], S->seq[a]);
+	  b++;
+	}
+    }
+  vfclose (fp);
+  
+  printf_system ("psiblast -db %s -query %s -num_iterations %d -out %s -outfmt %d", db, FullSeqF, num_iterations, FullBlastF, outfmt);
+  
+  fp=vfopen (FullBlastF, "r");
+  while ((buf=vfgets (buf, fp))!=NULL && !strstr (buf, "<BlastOutput_iterations>"))
+    header=vcat (header, buf);
+  footer=csprintf (NULL, "</BlastOutput_iterations>\n</BlastOutput>\n");
+  
+
+  for ( a=0; a<S->nseq; a++)
+    {
+      if (!dolist[a])
+	{
+	  HERE ("...Skip %s", S->name[a]);
+	  continue;
+	}
+      lheader=csprintf (lheader, "%s", header);
+      if (a>0)
+	{
+	  lheader=substitute(lheader, S->name[0], S->name[a]);
+	  ilen=csprintf (ilen,"<BlastOutput_query-len>%d</BlastOutput_query-len>", strlen (S->seq[0]));
+	  olen=csprintf (olen,"<BlastOutput_query-len>%d</BlastOutput_query-len>", strlen (S->seq[a]));
+	}
+      
+      string2file(S->file[a],"w", ">A\n%s\n", S->seq[a]);//Note: name is removed
+      out=vfopen (S->blastfile[a], "w");
+      fprintf ( out, "%s", lheader);
+      while ((buf=vfgets (buf, fp))!=NULL && !strstr (buf, "</Iteration>"))
+	{
+	  fprintf (out, "%s", buf);
+	}
+      fprintf (out, "%s", buf);
+      fprintf ( out,"%s", footer);
+      vfclose (out);
+      if ( compress)
+	{
+	  ;
+	  printf_system_direct ("gzip %s", (S->file[a]));
+	  printf_system_direct ("gzip %s", (S->blastfile[a]));
+	}
+    }
+  vfclose (fp);
+  vfree (db);vfree(dbn);vfree(sname);vfree(outdir);
+  vfree(buf); 
+  vfree(header);vfree(lheader); vfree(ilen);vfree (olen);vfree(in); vfree(inz);
+  vfree(dolist );vfree(footer );
+    
+  return S;
+}
+Sequence * seq2prf ( Sequence *S)
+{
+  int prot_min_cov, prot_min_sim, prot_max_sim, psitrim;
+  char *outdir=NULL;
+  char *psitrim_mode=NULL;
+  char *psitrim_tree=NULL;
+  char *sname=NULL;
+  char *prfF=NULL;
+  char *seqF=vtmpnam (NULL);
+  int a;
+  FILE *fp;
+
+  seq2blast (S);
+  
+  if (getenv("prot_min_cov_4_TCOFFEE"))prot_min_cov=atoi(getenv("prot_min_cov_4_TCOFFEE"));
+  else prot_min_cov=40;
+  
+  if (getenv("prot_min_sim_4_TCOFFEE"))prot_min_sim=atoi(getenv("prot_min_sim_4_TCOFFEE"));
+  else prot_min_sim=50;
+  
+  if (getenv("prot_max_sim_4_TCOFFEE"))prot_max_sim=atoi(getenv("prot_max_sim_4_TCOFFEE"));
+  else prot_max_sim=90;
+  
+  if (getenv("psitrim_mode_4_TCOFFEE"))psitrim_mode=getenv("psitrim_mode_4_TCOFFEE");
+  else psitrim_mode=csprintf (psitrim_mode, "regtrim");
+  
+  if (getenv("psitrim_tree_4_TCOFFEE"))psitrim_mode=getenv("psitrim_tree_4_TCOFFEE");
+  else psitrim_tree=csprintf (psitrim_tree, "codns");
+  
+  if (getenv("psitrim_4_TCOFFEE"))prot_max_sim=atoi(getenv("psitrim_4_TCOFFEE"));
+  else psitrim=100;
+  
+  
+  if (getenv("cache_4_TCOFFEE"))
+    {
+      outdir=csprintf (outdir, "%s", getenv("cache_4_TCOFFEE"));
+      if (outdir[0]!='/')outdir=csprintf (outdir, "./%s", getenv("cache_4_TCOFFEE"));
+    }
+  else  outdir=csprintf (outdir, "./");
+  my_mkdir (outdir);
+  
+  for ( a=0; a<S->nseq; a++)
+    {
+      sname=clean_sname(csprintf (sname, "%s", S->name[a]));
+      prfF=csprintf (prfF, "%s/%s.prf", outdir,sname);
+      S->seq_comment[a]=strcatf(S->seq_comment[a], " _R_ %s ", prfF);
+      S->aln_comment[a]=strcatf(S->aln_comment[a], " _R_ %s ", prfF);
+      string2file (seqF,"w", ">%s\n%s\n", S->name[a], S->seq[a]);
+      printf_system ("tc_generic_method.pl -mode=blast2prf -infile=%s -seqfile=%s -outfile=%s -minid=%d -maxid=%d -mincov=%d -trim=%d", S->blastfile[a], seqF, prfF, prot_min_sim, prot_max_sim, prot_min_cov, psitrim);
+    }
+  
+  return S;
 }
 
 
@@ -5925,9 +6241,13 @@ int handle_X_template_files ( X_template *T, char *mode)
       }
     else if (strm (mode, "display"))
       {
-	char buf[100];
-	sprintf ( buf, "Template %s",  template_type2type_name (T->template_type));
-	if (check_file_exists (T->template_name))display_output_filename ( stdout,buf,T->template_format,T->template_name, STORE);
+	static char *buf;
+	//do not diplay the nameof template files that are in the cache
+	if ( !strstr (T->template_name, get_cache_dir()))
+	  {
+	    buf=csprintf (buf,"Template %s",  template_type2type_name (T->template_type));
+	    if (check_file_exists (T->template_name))display_output_filename ( stdout,buf,T->template_format,T->template_name, STORE);
+	  }
       }
     else
       {
@@ -5993,6 +6313,7 @@ Sequence * seq2template_seq ( Sequence *S, char *template_list, Fname *F)
   BmC=get_int_variable ("prot_min_cov");
   Trim=get_int_variable("psitrim");
   
+
   if (strm (prot_db, "dataset") || strm (prot_db, "self"))
     {
       if (!seqdb)
@@ -6074,9 +6395,10 @@ Sequence * seq2template_seq ( Sequence *S, char *template_list, Fname *F)
     }
   else if (strm ( template_list, "PSIBLAST"))
     {
+      //Note PSIBLAST ans BLAST are NOW THE SAME, but BLAST=psiblast -num_iterations 1
       check_blast_is_installed(server);
     
-      sprintf ( buf, "SCRIPT_tc_generic_method.pl@mode#psiprofile_template@database#%s@method#psiblast@cache#%s@minid#%d@maxid#%d@mincov#%d@trim#%d@server#%s@type#_R_", prot_db,get_cache_dir(),BmI,BMI,BmC,Trim,server);
+      sprintf ( buf, "SCRIPT_tc_generic_method.pl@mode#psiprofile_template@database#%s@method#blastp@cache#%s@minid#%d@maxid#%d@mincov#%d@trim#%d@server#%s@type#_R_", prot_db,get_cache_dir(),BmI,BMI,BmC,Trim,server);
       S=seq2template_seq (S,buf, F);
 
       return S;
@@ -6085,7 +6407,7 @@ Sequence * seq2template_seq ( Sequence *S, char *template_list, Fname *F)
     {
 
       check_blast_is_installed(server);
-
+      
       sprintf ( buf, "SCRIPT_tc_generic_method.pl@mode#profile_template@database#%s@method#blastp@cache#%s@minid#%d@maxid#%d@mincov#%d@trim#%d@server#%s@type#_R_", prot_db,get_cache_dir(),BmI,BMI,BmC,Trim,server);
       S=seq2template_seq (S,buf, F);
 
@@ -6187,7 +6509,13 @@ Sequence * seq2template_seq ( Sequence *S, char *template_list, Fname *F)
 	  char *p;
 	  if ((i=name_is_in_list(T->name[a], S->name, S->nseq, MAXNAMES))!=-1)
 	    {
-	      
+	      //This thing because the new parsing does not keep the space between name and comments in FASTA
+	      if (T->seq_comment[a] && T->seq_comment[a][0]=='_')
+		{
+		  char *buf=csprintf (NULL, " %s", T->seq_comment[a]);
+		  T->seq_comment[a]=csprintf ( T->seq_comment[a], "%s",buf);
+		  vfree(buf);
+		}
 	      if (       (p=strstr (T->seq_comment[a], " _P_ ")) && !(S->T[i])->P &&( (S->T[i])->P=fill_P_template (S->name[i],p,S)))ntemp++;
 	      else if (  (p=strstr (T->seq_comment[a], " _F_ ")) && !(S->T[i])->F &&( (S->T[i])->F=fill_F_template (S->name[i],p,S)))ntemp++;
 	      else if (  (p=strstr (T->seq_comment[a], " _S_ ")) && !(S->T[i])->S &&( (S->T[i])->S=fill_S_template (S->name[i],p,S)))ntemp++;
@@ -6230,7 +6558,7 @@ Sequence * seq2template_seq ( Sequence *S, char *template_list, Fname *F)
       char *p;
       int z, i;
       int freeF=0;
-
+     
       if (!script)script=(char*)vcalloc ( 1000, sizeof(char));
 
       ntemp++;
@@ -6340,7 +6668,7 @@ Sequence * seq2template_seq ( Sequence *S, char *template_list, Fname *F)
       char *p;
       int z;
       if (!script)script=(char*)vcalloc ( 1000, sizeof(char));
-
+     
       ntemp++;
 
       command=(char*)vcalloc ( 1000, sizeof (char));
@@ -6379,7 +6707,7 @@ Sequence * seq2template_seq ( Sequence *S, char *template_list, Fname *F)
       my_system ( command);
 
       free_aln (A);
-
+      
       if ( check_file_exists (outfile) && format_is_fasta(outfile))
 	{
 	  S=seq2template_seq (S, outfile, F);
@@ -6891,7 +7219,13 @@ struct X_template *fill_R_template ( char *name,char *p, Sequence *S)
 
   R=fill_X_template ( name, p, "_R_");
   sprintf (R->template_format , "fasta_aln");
-
+  
+  if (!isfile(R->template_name))
+    {
+      static char *buf;
+      buf=csprintf (buf, "%s/%s", get_cache_dir(),R->template_name);
+      sprintf (R->template_name, "%s", buf);
+    }
 
   if (!is_aln(R->template_name) && !is_seq (R->template_name))
     {
