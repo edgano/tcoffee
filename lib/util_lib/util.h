@@ -385,6 +385,10 @@ FILE *print_array_char (FILE *out, char **array, int n, char *sep);
 char *extract_suffixe ( char *array);
 char * path2filename ( char *array);
 char *filename2path (char *name);
+char *afname2fname (char *name);
+char  *fname2suffix (char *name);
+char  *fname2prefix (char *name);
+
 Fname* parse_fname ( char *array);
 
 void string_array_convert ( char **array, int n_strings, int ns, char **sl);
@@ -644,6 +648,9 @@ int cputenv4pathFirst (char*);
 int cputenv4pathLast (char*);
 int cputenv4path (char*);
 
+int buffer_env  (char *env);
+int restore_env (char *env);
+
 int   cputenv (char*, ...);
 int   fcputenv (char *,char *, char*, ...);
 char *file_putenv (char *file);
@@ -852,3 +859,6 @@ double    km_data2evaluate ( double **d, int n, int dim);
 double km_kmeans_bs (double **data, int n, int dim, int k,double t, double **centroids, int nrounds);
 
 int mat2process (int n, char *flist[]);
+int set_verbose(int mode);
+int verbose();
+

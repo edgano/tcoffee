@@ -160,7 +160,8 @@ int seq_reformat ( int argc, char **in_argv)
 		fprintf ( stdout, "\n");
 
 		fprintf ( stdout, "\n***********     REFORMAT ACTIONS               *****************");
-		fprintf ( stdout, "\n     +Xaction.............Specifies which file undergoes the action");
+		fprintf ( stdout, "\n     +....................The + action are set sequencially and only affect further actions (right)");
+		fprintf ( stdout, "\n     +Xaction.............Specifies which file undergoes the action (facultative)");
 		fprintf ( stdout, "\n     +Xaction.............X=1: -in");
 		fprintf ( stdout, "\n     +Xaction.............X=2: -in2");
 		fprintf ( stdout, "\n     +Xaction.............X=3: -struc_in");
@@ -224,7 +225,10 @@ int seq_reformat ( int argc, char **in_argv)
 		fprintf ( stdout, "\n     .......................! seq offset_value (0 by default)");
 		fprintf ( stdout, "\n     .....................Can extract as many positions as needed");
 		fprintf ( stdout, "\n     .....................seq=cons: measure positions on the full aln");
-		fprintf ( stdout, "\n     +cat_aln.............Concatenates the alignments input via -in and -in2");
+		
+		
+		fprintf ( stdout, "\n     +split.<N>............Split fasta file into smaller files\n");
+		fprintf ( stdout, "\n     +cat_aln..............Concatenates the alignments input via -in and -in2");
 		fprintf ( stdout, "\n     +cat_aln.............-if no -in2, -in is expected to be a list of alignments to concatenate");
 		fprintf ( stdout, "\n     +orthologous_cat..<mode>: mode=voronoi or nothing");
 		fprintf ( stdout, "\n     ......................-in: sequences from different species");
@@ -364,11 +368,30 @@ int seq_reformat ( int argc, char **in_argv)
 		fprintf ( stdout, "\n     +tree..gap <F|def=0.5> replicates<D|column|def=1> mode <nj|upgma|def=nj>");
 		
 		fprintf ( stdout, "\n     +remove_nuc.x........Remove Position 1, 2 or 3 of every codon");
+		fprintf ( stdout, "\n     +phylo3D.<tree|gtree>...Replaces evaluate3D for the estimation of 3D trees\n");
+		fprintf ( stdout, "\n     ........................The parameters below must be set BEFORE +phylo3D\n"); 
+		fprintf ( stdout, "\n        +enb <int>..............Specifies the number of excluded nb (def=3)\n");
+		fprintf ( stdout, "\n        +replicates <int>.......Specifies the number of replicates (def=0)\n");
+		fprintf ( stdout, "\n        +maxd <int|scan>........Specifies the distance cutoff (def=maximum distance on provided PDBs)\n");
+		fprintf ( stdout, "\n        +strict_maxd............ALL distances within pairs of columns must be <=maxd for a pair to be kept\n");
+		fprintf ( stdout, "\n        +soft_maxd..............ANY distances within pairs of columns must be <=maxd for a pair to be kept\n");
+		
+		fprintf ( stdout, "\n        +align_method.<st1 st2>.Specifies which T-Coffee method in gtree, use sa_pair for struc based aln\n");
+		fprintf ( stdout, "\n        +columns4tree.<file>....Specifies the columns to be used <c1> <c2> on each line (1-len_aln)\n");
+		fprintf ( stdout, "\n        +max_gap.<float>........Specifies the maximum fraction of gaps for columns to be considered (<=)\n");
+		fprintf ( stdout, "\n        +print_nsites...........adds to the dm output a line specifying the number of sites used\n");
+		fprintf ( stdout, "\n        +phylo3d_dm.............distance mode (def=4)\n");
+		fprintf ( stdout, "\n        +phylo3d_exp............distance exponentiation (def=2)\n");
+		fprintf ( stdout, "\n        +phylo3d_no_weight......unweighted distance_mode\n");
+		fprintf ( stdout, "\n        +ref_tree <file>........specifies the ref tree when +maxd=scan\n");
+		
 		fprintf ( stdout, "\n     +evaluate3D..........strike|distances|contacts");
 		fprintf ( stdout, "\n     .....................Uses the -in2 contact_lib or the +pdb2contacts +seq2contacts ");
 		fprintf ( stdout, "\n     .....................If none, uses +seq2contacts ");
 		fprintf ( stdout, "\n     .....................-output score_ascii, score, score_html,fasta_tree ");
 		fprintf ( stdout, "\n     .....................+tree [1] trigers tree computation for -output fasta_tree");
+		fprintf ( stdout, "\n     .....................+scan3D <value> ....triggers scanning of 3D threshold values that maximise RF similarity to ref_tree");
+		fprintf ( stdout, "\n     .....................+ref_tree <fname>... will either use fname or compute fname from -in <msa> using cw\n");
 		fprintf ( stdout, "\n     .....................distances..<Max|Def=15 >");
 		fprintf ( stdout, "\n     .....................contacts...<Max|Def=1.2> <nb|Def=3>");
 		fprintf ( stdout, "\n     .....................contacts|distances provided via -in2=contact_lib");
@@ -384,6 +407,7 @@ int seq_reformat ( int argc, char **in_argv)
 		fprintf ( stdout, "\n     .....................Uses Natural Gap penalties");
 		fprintf ( stdout, "\n     .....................gop and gep must be negative");
 		fprintf ( stdout, "\n     .....................use -output=color_ascii, color_html to get a color display");
+
 
 		fprintf ( stdout, "\n.....+evaluate_lat........Make a lateral evaluation with matrix");
 		fprintf ( stdout, "\n     +msa_weight proc.....Computes weights using the procedure");
@@ -1589,40 +1613,28 @@ long *fasta2map(char *file)
   FILE *fp;
   int i=0;
   long pos=0;
-  char c,lc;
+  char c,lc,pc;
   long *map;
   int ml=1000;
   int a;
-  char buf[VERY_LONG_STRING];
-  
-
+  char buf[SUPER_LONG_STRING];
   
   if ( !file || !check_file_exists (file) || !(fp=vfopen(file, "r"))) return NULL;
   
   map=(long*)vcalloc (ml, sizeof (long));
-  
-  
-  while ((c=fgetc(fp))!=EOF){;}
-  vfclose(fp);
-  
-  fp=vfopen(file, "r");
-  while (fgets(buf,VERY_LONG_STRING,fp));
-  
-  vfclose(fp);  
-  
-
-  fp=vfopen(file, "r");
   pos=0;
-  while (fgets(buf,VERY_LONG_STRING,fp))
+  pc='\n';
+  while (fgets(buf,SUPER_LONG_STRING,fp))
     {
       int d=0;
       while ((c=buf[d++])!='\0')
 	{
-	  if (c=='>')
+	  if (c=='>' && pc=='\n')
 	    {
-	      if (i>=ml){ml+=VERY_LONG_STRING; map=(long*)vrealloc (map, ml*sizeof (long));}
+	      if (i>=ml){ml+=SUPER_LONG_STRING; map=(long*)vrealloc (map, ml*sizeof (long));}
 	      map[i++]=pos;
 	    }
+	  pc=c;
 	  pos++;
 	}
     }
@@ -1659,6 +1671,76 @@ Alignment *reload_aln(Alignment *A)
   char *tmp=vtmpnam (NULL);
   dump_msa (A,tmp);
   return quick_read_fasta_aln(A,tmp);
+}
+char *      split_fasta (char *file, int size)
+{
+  long *map;
+  int i, j,nseq, n;
+  FILE *fp=NULL;
+  char *split=NULL;
+  char *buf=NULL;
+  int nb=0;
+  char *fill=NULL;
+  char *odir=NULL;
+  char *ofile=afname2fname(file);
+  
+  
+  if ( getenv("odir_4_TCOFFEE"))
+    {
+      char *buf=getenv("odir_4_TCOFFEE");
+      if (buf[0]=='/')odir=csprintf (odir,"%s/",buf);
+      else odir=csprintf (odir,"./%s/", buf);
+    }
+  else
+    odir=csprintf (odir, "./");
+  my_mkdir (odir);
+  
+  fprintf (stderr, "! Start Indexing\n");
+  file2record_it(NULL,0, NULL);
+  map=fasta2map(file);
+  nseq=read_array_size_new (map)-1;
+  fprintf (stderr, "! Indexing Finished -- %d Sequences\n", nseq);
+  
+  
+  
+  for(n=0,j=0,i=0;i<nseq; i++,j++)
+    {
+      char *s;
+      
+      if (j==0|| j==size)
+	{
+	  
+	  j=0;
+	  if (n<10)fill=csprintf (fill, "00");
+	  else if (n<100)fill=csprintf (fill, "0");
+	  else fill=csprintf (fill, "0");
+	  
+	  fprintf (stdout, "%s%s.%s%d.split --- %.2f%%\n",odir,ofile,fill,n, ((float)i/(float)nseq)*(float)100);
+	  split=csprintf(split,"%s%s.%s%d.split", odir,ofile, fill,n);
+	  if (fp){vfclose(fp);}
+	  fp=vfopen(split, "w");
+	  n++;
+	}
+      if ((s=file2record_it(file,i, map)))
+	{
+	  buf=vcat(buf,s);
+	  nb++;
+	  if ( nb=10000)
+	    {
+	      fprintf (fp, "%s",buf);
+	      buf[0]='\0';
+	      nb=0;
+	    }
+	}
+      else
+	{
+	  HERE ("FAILED to parse file. Possible file corruption [FATAL]");exit (0);
+	}
+    }
+  vfclose (fp);
+  vfree(map);
+  exit (EXIT_SUCCESS);
+  return NULL;
 }
 Alignment * quick_read_fasta_aln (Alignment *A, char *file)
 {
@@ -1872,7 +1954,6 @@ char **identify_list_format ( char **list, int n)
 	   char *name;
 	   char *string;
 	   char mode;
-
 
 
 	   declare_name (name);
@@ -2152,6 +2233,7 @@ char*  is_pdb_struc_strict ( char *name)
      if (is_pdb_file(name)){r=name;}
      else if (is_pdb_name (name))
        {
+	 HERE ("extract_from_pdb -netfile \'%s\' > %s/%s 2>/dev/null",name, get_cache_dir(),name);
 	 printf_system ("extract_from_pdb -netfile \'%s\' > %s/%s 2>/dev/null",name, get_cache_dir(),name);
 	 if ( is_pdb_file(name))r=name;
 	 else r=NULL;
@@ -2981,7 +3063,7 @@ int output_format_aln ( char *format, Alignment *inA, Alignment *inEA,char *name
 
 	A =copy_aln (inA, NULL);
 	A->CL=inA->CL;
-	EA=copy_aln (inEA,NULL);
+	EA=copy_number_aln  (inEA,NULL);
 	A =expand_aln(A);
 	EA=expand_number_aln(inA,EA);
 
@@ -4019,49 +4101,35 @@ int main_output  (Sequence_data_struc *D1, Sequence_data_struc *D2, Sequence_dat
 	    no_rec_print_tree_randomize (D1->T, stdout);
 	    fprintf (stdout, ";\n");
 	  }
-	else if ( strm  (out_format, "dm"))
+	else if ( strm  (out_format, "dm") || strm  (out_format, "dm_newick")||strm  (out_format, "newick_dm")|| strm (out_format,"newick_tree") || strm (out_format,"binary") || strm (out_format,"nh") )
 	  {
 	    int x;
 	    FILE *fpx;
-	    if (D1 && D1->A && (D1->A)->Tree && ((D1->A)->Tree)->dmF_list)
+	    int ptree, pdm;
+	    if ( strstr (out_format, "dm"))pdm=1;
+	    else pdm=0;
+	    
+	    if ( strstr (out_format, "newick"))ptree=1;
+	    else if (!strstr(out_format, "dm"))ptree=1;
+	    else ptree=0;
+	    
+
+
+	    if (!D1)return 1;
+	    else if (D1 && !D1->T && D1->A && (D1->A)->Tree)
 	      {
 		Alignment *T=(D1->A)->Tree;
 		FILE *fpx=vfopen (out_file, "w");
-		display_file_content (fpx,T->dmF_list[0]);
-		if (int_variable_isset ("print_replicates")) 
-		  for (x=1; x<T->nseq; x++)
-		    {
-		      display_file_content (fpx,T->dmF_list[x]);
-		    }
+		for (x=0; x<T->nseq; x++)
+		  {
+		    if (ptree)fprintf (fpx, "%s\n", T->seq_al[x]);
+		    if (pdm && T->dmF_list )display_file_content (fpx,T->dmF_list[x]);
+		    else printf_exit ( EXIT_FAILURE, stderr, "Distance Matrix Not produced\n", PROGRAM);
+		  }
 		vfclose (fpx);
 	      }
-	    else
-	      {
-		printf_exit ( EXIT_FAILURE, stderr, "Distance Matrix Not produced\n", PROGRAM);
-	      }
-	  }
-	else if ( strm  (out_format, "newick_dm"))
-	  {
-	    int x;
-	    FILE *fpx;
-	    if (D1 && D1->A && (D1->A)->Tree && ((D1->A)->Tree)->dmF_list)
-	      {
-		Alignment *T=(D1->A)->Tree;
-		FILE *fpx=vfopen (out_file, "w");
-		fprintf (fpx, "%s\n", T->seq_al[0]);
-		display_file_content (fpx,T->dmF_list[0]);
-		if (int_variable_isset ("print_replicates")) 
-		  for (x=1; x<T->nseq; x++)
-		    {
-		      fprintf (fpx, "%s\n", T->seq_al[0]);
-		      display_file_content (fpx,T->dmF_list[x]);
-		    }
-		vfclose (fpx);
-	      }
-	    else
-	      {
-		printf_exit ( EXIT_FAILURE, stderr, "Distance Matrix Not produced\n", PROGRAM);
-	      }
+	    else if (D1->T  && ptree)print_newick_tree (D1->T, out_file);
+	    else printf_exit ( EXIT_FAILURE, stderr, "No Tree to be printed\n", PROGRAM);
 	  }
 	else if ( strm  (out_format, "mafftnewick"))
 	  {
@@ -11064,7 +11132,8 @@ void modify_data  (Sequence_data_struc *D1in, Sequence_data_struc *D2in, Sequenc
 	   D2=D2in;
 	   DST=DSTin;
 	 }
-       if (!D1->A)D1->A=copy_aln (D1in->A, NULL);
+
+       if (D1 && !D1->A && D1in && D1in->A)D1->A=copy_aln (D1in->A, NULL);
 
        if (  strm(action, "seqnos"))
 	 {
@@ -11705,13 +11774,63 @@ void modify_data  (Sequence_data_struc *D1in, Sequence_data_struc *D2in, Sequenc
 	 {
 	   cputenv ("TREE_MODE_4_TCOFFEE=%s",ACTION(1));
 	 }
-       else if ( strm(action, "gtree"))
+       
+       else if ( strm (action, "scan3D"))
 	 {
-	   gtree=1;
-	   
+	   if (!ACTION(1))cputenv ("scan3D=100");
+	   else cputenv ("scan3D=%s",ACTION(1));
 	 }
-       else if ( strm(action, "tree"))
+       else if (strm (action, "verbose"))set_verbose(1);
+       else if (strm (action, "quiet"))set_verbose(0);
+       else if (strm (action, "pedantic"))set_verbose(2);
+       else if (strm (action, "print_nsites"))cputenv ("PRINT_NSITES=1");
+       else if ( strm(action, "ref_tree"))cputenv ("REFERENCE_TREE=%s", ACTION(1));
+       else if ( strm(action, "replicates"))cputenv ("REPLICATES_4_TCOFFEE=%s",ACTION(1));
+       else if ( strm(action, "enb"))cputenv ("enb_4_TCOFFEE=%s",ACTION(1));
+       else if ( strm(action, "maxd"))cputenv ("maxd_4_TCOFFEE=%s",ACTION(1));
+       else if ( strm(action, "max_maxd"))cputenv ("max_maxd_4_TCOFFEE=%s",ACTION(1));
+       else if ( strm(action, "min_maxd"))cputenv ("min_maxd_4_TCOFFEE=%s",ACTION(1));
+       else if ( strm(action, "strict_maxd"))cputenv ("strict_maxd_4_TCOFFEE=%s",ACTION(1));
+       else if ( strm(action, "soft_maxd"))cputenv ("soft_maxd_4_TCOFFEE=%s",ACTION(1));
+       else if ( strm(action, "first_maxd"))cputenv ("first_maxd_4_TCOFFEE=%s",ACTION(1));
+       else if ( strm(action, "odir"))cputenv ("odir_4_TCOFFEE=%s",ACTION(1));
+       else if ( strm(action, "align_method"))
 	 {
+	   char *ml=NULL;
+	   int xx;
+	   for (xx=1; xx<n_actions; xx++)ml=csprintf (ml, "%s%s ", (ml)?ml:"",ACTION(xx));
+	   cputenv ("align_method_4_TCOFFEE=%s",ml);
+	 }
+       else if ( strm(action, "gap"))cputenv ("gap_4_TCOFFEE=%s",ACTION(1));
+       else if ( strm(action, "phylo3d_dm"))cputenv ("THREED_TREE_MODE=%s",ACTION(1));
+       else if ( strm(action, "phylo3d_exp"))cputenv ("THREED_TREE_MODE_EXP=%s",ACTION(1));
+       else if ( strm(action, "phylo3d_noweights"))cputenv ("THREED_TREE_NO_WEIGHTS=%s",ACTION(1));
+       else if ( strm(action, "columns4tree"))
+	 {
+	   char *f=ACTION(1);//legacy
+	   set_string_variable ("columns4treeF",f);//legacy
+	   
+	   cputenv ("columns4tree_4_TCOFFEE=%s",ACTION(1));
+	 }
+       else if (strm (action, "phylo3d"))
+	 {
+	   ungap_seq(D1->S);
+	   if ( !D2 || !D2->S)
+	     printf_exit ( EXIT_FAILURE,stderr, "\nERROR: +phylo3D requires a tenmplate file via -in2");
+	   D1->CL=pdb2contacts (D1->S, D2->S,D1->CL, "intra","distances",1000000);
+	   if (n_actions>1 && strm (ACTION(1), "gtree"))
+	     {
+	       if (!D1->A)D1->A=seq2aln (D1->S,NULL, RM_GAP);
+	       D1->A=phylo3d_gt (D1->A, D1->CL);
+	     }
+	   else
+	     D1->A=phylo3d (D1->A, D1->CL);
+	 }
+       
+
+       else if ( strm(action, "tree") || strm (action, "gtree"))
+	 {
+	   if (strm (action, "gtree"))gtree=1;
 	   if      (!ACTION(1))cputenv ("REPLICATES_4_TCOFFEE=1");
 	   else if (is_number(ACTION(1)))cputenv ("REPLICATES_4_TCOFFEE=%s",ACTION(1));
 	   else
@@ -11722,19 +11841,13 @@ void modify_data  (Sequence_data_struc *D1in, Sequence_data_struc *D2in, Sequenc
 		   if      (strm (action_list[j], "mode")) cputenv ("TREE_MODE_4_TCOFFEE=%s",action_list[j+1]);
 		   else if (strm (action_list[j], "gap" )) cputenv ("TREE_GAP_4_TCOFFEE=%s" ,action_list[j+1]);
 		   else if (strm (action_list[j], "replicates"))cputenv ("REPLICATES_4_TCOFFEE=%s" ,action_list[j+1]);
-		   else if (strm (action_list[j], "group"))cputenv ("SGROUP_4_TCOFFEE=%s" ,action_list[j+1]);
-		   
-		   else printf_exit ( EXIT_FAILURE,stderr, "\nERROR: %s is not a known +tree parameter (replicates <int>|mode <string>|gap <float>|goup <seqfile>)[FATAL]",action_list[j]);
+		   else if (strm (action_list[j], "group"))cputenv ("SGROUP_4_TCOFFEE=%s" ,action_list[j+1]);		   
+		   else 
+		     printf_exit ( EXIT_FAILURE,stderr, "\nERROR: %s is not a known +%s parameter (replicates <int>|mode <string>|gap <float>|goup <seqfile>)[FATAL]",action,action_list[j]);
 		 }
 	     }
 	   
 	 }
-       else if (strm(action, "columns4tree"))
-	 {
-	   char *f=ACTION(1);
-	   set_string_variable ("columns4treeF",f);
-	 }
-       
        else if ( strm(action, "evaluateGroup"))
 	 {
 	   
@@ -11805,6 +11918,7 @@ void modify_data  (Sequence_data_struc *D1in, Sequence_data_struc *D2in, Sequenc
 	       if (ACTION(na+1) && !strm (ACTION(na+1), "def"))max=atof(ACTION(na+1));
 	       if (ACTION(na+2) && !strm (ACTION(na+2), "def"))enb=atoi(ACTION(na+2));
 	     }
+	  
 	   DST->A=msa_list2struc_evaluate4tcoffee (D1->S,D2->S,DST->S,ev3d,max,enb, strikem);
 	   D1->A=(DST->A)->A;
 	   (DST->A)->A=NULL;
@@ -11928,7 +12042,7 @@ void modify_data  (Sequence_data_struc *D1in, Sequence_data_struc *D2in, Sequenc
 	       	       
 	       ungap_seq(D1->S);
 	       if (strm (ev3d, "distances"))
-		 D1->CL=pdb2contacts (D1->S, D2?(D2->S):NULL,D1->CL, "intra","distances",max);
+		 D1->CL=pdb2contacts (D1->S, D2?(D2->S):NULL,D1->CL, "intra","distances",(max==0)?1000000:max);//make no limit if Max==0
 	       else if (strm (ev3d, "contacts"))
 		 D1->CL=pdb2contacts (D1->S, D2?(D2->S):NULL,D1->CL, "intra","contacts",0);
 	       else
@@ -11940,9 +12054,11 @@ void modify_data  (Sequence_data_struc *D1in, Sequence_data_struc *D2in, Sequenc
 	       CL=D1->CL;
 	     }
 
-
-	   if (gtree)struc_evaluate4tcoffee4gt (D1->A,CL,ev3d,max,enb, strikem);
-	   DST->A=struc_evaluate4tcoffee (D1->A,CL,ev3d,max,enb, strikem);
+	   
+	   if (gtree)
+	     DST->A=struc_evaluate4tcoffee4gt (D1->A,CL,ev3d,max,enb, strikem);
+	   else 
+	     DST->A=struc_evaluate4tcoffee (D1->A,CL,ev3d,max,enb, strikem);
 	 }
        else if ( strm(action, "hot"))
 	 {
@@ -12335,7 +12451,28 @@ void modify_data  (Sequence_data_struc *D1in, Sequence_data_struc *D2in, Sequenc
 	 {
 	   D1->A=orthologous_concatenate_aln (D1->A,D2->S, ACTION (1));
 	 }
+       else if ( strm (action, "split"))
+	 {
+	   char *file=split_fasta (ACTION(1), atoi (ACTION(2)));
+	   vfclose (display_file_content (NULL,file));
+	 }
+			     
+       else if (ACTION(1) && is_aln(ACTION(1)))
+	     {
+	         Alignment *B;
+		 int n=1;
 
+		 while (ACTION(n))
+		   {
+
+		     B=main_read_aln (ACTION(n), NULL);
+		     D1->A=concatenate_aln (D1->A, B, NULL);
+		     n++;
+		   }
+		 D1->S=aln2seq(D1->A);
+	     }
+
+       
        else if ( strm (action, "cat_aln"))
 	 {
 	   /*D1->A=aln_cat ( D1->A, D2 ->A);*/
@@ -13079,6 +13216,11 @@ void modify_data  (Sequence_data_struc *D1in, Sequence_data_struc *D2in, Sequenc
 	   D1->S=aln2seq (D1->A);
 	 }
        
+       else if ( strm (action, "sorttrim"))
+	 {
+	   if (!D1->A)printf_exit (EXIT_FAILURE,stderr,"\nERROR: sorttrim requires an MSA as input [FATAL:%s]", PROGRAM);
+	   D1->A=sorttrim (D1->A, atoi(action_list[1]));
+	 }
        else if ( strm (action, "regtrim"))
 	 {
 	   int ns, p;

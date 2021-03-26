@@ -1238,7 +1238,7 @@ Tree_sim* tree_cmp( NT_node T1, NT_node T2)
   TS1->uw=(TS1->uw+TS2->uw)*100/(TS1->max_uw+TS2->max_uw);
   TS1->w=(TS1->w+TS2->w)*100/(TS1->max_w+TS2->max_w);
   TS1->d=(TS1->d+TS2->d)*100/(TS1->max_d+TS2->max_d);
-  TS1->rf=(TS1->rf+TS2->rf)/2;
+  TS1->rf=(((TS1->rf+TS2->rf))*10)/2;
   vfree (TS2);
   return TS1;
 }
@@ -1513,7 +1513,8 @@ NT_node main_compare_trees ( NT_node T1, NT_node T2, FILE *fp)
   Tree_sim *T;
 
   T=tree_cmp (T1, T2);
-  fprintf ( fp, "\n#tree_cmp|T: %.f W: %.2f L: %.2f RF: %d N: %d S: %d", T->uw, T->w, T->d, T->rf, T->n, T->nseq);
+  fprintf ( fp, "\n#tree_cmp|T: %.2f W: %.2f L: %.2f RF: %.2f N: %d S: %d", T->uw, T->w, T->d, (float)T->rf/10, T->n, T->nseq);
+  fprintf ( fp, "\n#Distance obtained by averaging T1 vs T2 and T2 vs T1");
   fprintf ( fp, "\n#tree_cmp_def|T: ratio of identical nodes");
   fprintf ( fp, "\n#tree_cmp_def|W: ratio of identical nodes weighted with the min Nseq below node");
   fprintf ( fp, "\n#tree_cmp_def|L: average branch length similarity");
@@ -1870,6 +1871,7 @@ NT_node compute_std_tree_2 (Alignment *A, int **s, char *cl)
       free_int (s, -1);
       return compute_cw_tree (A);
     }
+
 
   //compute distance matrix if needed
   if ( !s)
@@ -7947,13 +7949,18 @@ char *kmsa2msa (KT_node K,Sequence *S, ALNcol***S2,ALNcol*start)
   msa=start;
   if (!output || strm (output, "fasta_aln"))
     {
-      
+      int nn;
       fp=vfopen (out, "w");
-      for (s=0; s<S->nseq; s++)
+      for (nn=0,s=0; s<S->nseq; s++, nn++)
 	{
 	  int r=0;
 	  msa=start;
-	  
+	  if (nn==1000)
+	    {
+	      vfclose (fp);
+	      fp=vfopen (out, "a");
+	      nn=0;
+	    }
 	  output_completion (stderr,s,S->nseq, 100, "Final MSA");
 	  for (c=0; c<S->len[s]; c++)
 	    {
@@ -8347,8 +8354,70 @@ int ktree2klist (KT_node K, KT_node *KL, int *n)
   return n[0];
 }
 
+Alignment * sorttrim (Alignment *A,int ntrim)
+{
+  int **lu, *max, *used;
+  int s, c;
+  FILE *fp;
+  char *tmp=vtmpnam (NULL);
+  int maxnseq;
+  int newn;
+  int bin,nbin=100;
+  if (!A) return A;
+  else if (A->nseq<=ntrim)return A;
+  
 
-Sequence * regtrim (Sequence *S, NT_node T, int N)
+  
+
+  lu=declare_int     (nbin, A->nseq);
+  max =(int*)vcalloc (nbin, sizeof (int));
+  used=(int*)vcalloc (nbin, sizeof (int));
+    
+  for (maxnseq=0,s=1; s<A->nseq; s++)
+    {
+      int bin, n, t;
+      
+      for (t=0, n=0,c=0; c<A->len_aln; c++)
+	{
+	  char c1=A->seq_al[0][c]; 
+	  char c2=A->seq_al[s][c]; 
+	  
+
+	  if (c1=='-' || c2=='-')continue;
+	  if (c1!=c2)n++;
+	  t++;
+	}
+      if (t==0)continue;
+      bin=((n*100)/t)%nbin;
+      lu[bin][max[bin]++]=s;
+      maxnseq++;
+    }
+  
+  fp=vfopen (tmp, "w");
+  fprintf (fp, ">%s\n%s\n",A->name[0], A->seq_al[0]);
+  
+  newn=0;
+  while ( newn<maxnseq && newn<ntrim)
+    {
+      for (bin=0; bin<nbin && newn<ntrim; bin++)
+	{
+	  if (used[bin]==max[bin])continue;
+	  else s=lu[bin][used[bin]++];
+	  fprintf (fp, ">%s\n%s\n",A->name[s], A->seq_al[s]);
+	  newn++;
+	}
+    }
+  vfclose (fp);
+  
+  vfree (max);
+  vfree (used);
+  free_int (lu, -1);
+  return quick_read_fasta_aln (A, tmp);
+}
+
+
+
+Sequence  * regtrim (Sequence *S, NT_node T, int N)
 {
   NT_node *CL, *NL;
   int left, right, nc,nn, a,s,terminal;

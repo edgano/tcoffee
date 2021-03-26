@@ -1902,7 +1902,7 @@ Constraint_list * sap_pair   (char *seq_in, char *weight, Constraint_list *CL)
    int ntry=0;
    int max_ntry=3;
    int issap=0;
-   //Number of times sap will try to align pdb1 with pdb2. Sap is non deterministic and may crash depending on the seed it usues
+   //Number of times sap will try to align pdb1 with pdb2. Sap is non deterministic and may crash depending on the seed it usses
    //THis number should do fine for up to 1,000 structures
    int a, c,s1, s2,tot,sim,score,max;
    FILE *fp;
@@ -2808,8 +2808,39 @@ Alignment *align_two_streches4dpa ( char *s0, char *s1, char *in_matrix, int gop
   
 
 
+Alignment * align_two_structures ( Sequence *S, int s1, int s2, char *mode)
+{
+  static char *in=vtmpnam (NULL);
+  static char *out=vtmpnam (NULL);
+  static char *command=NULL;
+  Alignment *R;
+  
+  FILE *fp;
+  
+  fp=vfopen (in, "w");
 
+  
+  fprintf (fp, ">%s _P_ %s\n%s\n",S->name[s1],seq2T_value(S,s1, "template_file", "_P_"),S->seq[s1]);
+  fprintf (fp, ">%s _P_ %s\n%s\n",S->name[s2],seq2T_value(S,s2, "template_file", "_P_"),S->seq[s2]);
+  vfclose (fp);
 
+  
+  
+  if (verbose()==2)command=csprintf (command,"t_coffee -in %s -template_file %s -method %s -outfile=%s -output fasta_aln",in,in,mode, out);
+  else command=csprintf (command,"t_coffee -in %s -template_file %s -method %s -outfile=%s -output fasta_aln -quiet >/dev/null 2>/dev/null",in,in,mode, out);
+  system (command);
+  
+  if (!format_is_fasta(out))
+    {
+      add_warning ( stderr, "\nCould not align %s and %s with %s\nUse sequence alignment instead",S->name[s1],S->name[s2],mode,PROGRAM);
+      return align_two_sequences (S->seq[s1], S->seq[s2], "blosum62mt", -8, -1, "myers_miller_pair_wise");
+    }
+  R=quick_read_fasta_aln (NULL,out);
+  remove(out);
+  return R;
+}
+  
+  
 
 Alignment * align_two_sequences ( char *seq1, char *seq2, char *in_matrix, int gop, int gep, char *in_align_mode)
 {

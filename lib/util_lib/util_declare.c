@@ -857,7 +857,26 @@ Weights* free_weights ( Weights* W)
 	return NULL;
 	}
 
-
+Alignment* copy_number_aln (Alignment *A, Alignment *B)
+        {
+	  int a, b, l;
+	  if (!A) return NULL;
+	  B=copy_aln (A, B);
+	  if (!B) return NULL;
+	  l=arrlen(A->seq_al);
+	  
+	  if (l>arrlen(B->seq_al))B->seq_al=(char**)vrealloc (B->seq_al, l*sizeof (char*));
+	  for (a=0; a<l; a++)
+	    {
+	      int l1 =arrlen(A->seq_al[a]);
+	      int l2 =arrlen(B->seq_al[a]);
+	      if (l2<l1) B->seq_al[a]=(char*)vrealloc (B->seq_al[a], l1*sizeof (char));
+	      for (b=0; b<l1; b++)
+		B->seq_al[a][b]=A->seq_al[a][b];
+	    }
+	  return B;
+	}
+	  
 Alignment* copy_aln ( Alignment *A, Alignment *B)
         {
 	  int a, b;
@@ -1306,6 +1325,7 @@ Alignment *free_data_in_aln (Alignment *A)
   if (A->Tree)free_Alignment (A->Tree);
   if (A->RepColList)free_int (A->RepColList, -1);
   if (A->dm)free_double (A->dm,-1);
+  if (A->dmF_list)vfree(A->dmF_list);
   A->S=NULL;
   return A;
 
@@ -1332,16 +1352,16 @@ Sequence* free_Alignment ( Alignment *LA)
 	  free_char ( LA->aln_comment, -1);
 
 	  free_int  ( LA->order, -1);
-
-	  free_double (LA->dm, -1),
 	  vfree ( LA->score_seq);
 	  vfree ( LA->len);
 
 	  free_profile (LA->P);
-	  if ( LA->A){free_Alignment (LA->A);LA->A=NULL;}
-	  if ( LA->Tree){free_Alignment (LA->Tree);LA->Tree=NULL;}
-	  if ( LA->RepColList)free_int (LA->RepColList, -1);
-	  if (LA->tname)vfree (LA->tname);
+	  free_Alignment (LA->A);
+	  free_Alignment (LA->Tree);
+	  free_int (LA->RepColList, -1);
+	  free_double (LA->dm,-1);
+	  vfree(LA->dmF_list); 
+	  vfree (LA->tname);
 	  vfree ( LA);
 	  return S;
 	}
@@ -1418,6 +1438,10 @@ void mem_profile (char *msg)
 {
  
   if (getenv ("PROFILE_MEM_4_TCOFFEE"))print_mem_usage(stdout,msg);
+}
+float mem_usage()
+{
+  return (float)((float)tot_mem/(1024*1024));
 }
 FILE* print_mem_usage (FILE *fp, char *comment)
 {

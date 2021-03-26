@@ -2935,7 +2935,8 @@ Fname* parse_fname ( char *array)
 	 int l;
 	 Fname *F;
 
-
+	 if (!array) return NULL;
+	 
 	 F=declare_fname( sizeof(array) );
 
 	 sprintf ( F->full, "%s", array);
@@ -2958,6 +2959,42 @@ Fname* parse_fname ( char *array)
 
 	return F;
         }
+char *afname2fname (char *name)
+{
+  char *fname=NULL;
+  int l;
+  
+  if (!name) return NULL;
+  
+  l=strlen (name)-1;
+  while (name[l]!='/' && l>-1)l--;
+
+  fname=csprintf (fname, "%s", name+l+1);
+  return fname;
+}
+char *fname2suffix (char *name)
+{
+  char *fname=NULL;
+  int l;
+  
+  if (!name) return NULL;
+  
+  l=strlen (name)-1;
+  while (name[l]!='.' && l>-1)l--;
+  if (l==-1)fname=csprintf (fname, "");
+  else fname=csprintf (fname, "%s", name+l+1);
+  return fname;
+}
+char *fname2prefix (char *name)
+{
+  int l;
+  char *fname=afname2fname(name);
+  if (!fname) return fname;
+  l=strlen (fname)-1;
+  while (fname[l]!='.' && l>-1)l--;
+  if (l>-1)fname[l]='\0';
+  return fname;
+}
 char *filename2path (char *name)
 {
   char *nname;
@@ -4119,7 +4156,6 @@ char * translate_string (char *string, char *in, char*out)
   return string;
 }
 
-
 int get_longest_string (char **array,int n, int *len, int *index)
      {
      int a, l;
@@ -4498,7 +4534,6 @@ int dump_nfc (char *file, char *container)
   vfclose (fp);
   
 }
-
 
 
 
@@ -5632,7 +5667,30 @@ char * get_os()
   return os;
 }
 
+int buffer_env  (char *env)
+{
+  static char *buffered;
+  if (!env) return 0;
+  else if ( !getenv (env)) return 0;
+  
+  buffered=csprintf (buffered, "%s_BUFFERED",env);
+  
+  cputenv ("%s=%s",buffered,getenv (env));
+  unsetenv (env);
+  return 1;
+}
+int restore_env (char *env)
+{
+  static char *buffered;
+  if (!env) return 0;
 
+  buffered=csprintf (buffered, "%s_BUFFERED",env);
+  if (!getenv (buffered)) return 0;
+  cputenv ("%s=%s",env,getenv (buffered));
+  unsetenv (buffered);
+  return 1;
+}
+      
 int cputenv (char *string, ...)
 {
   //
@@ -6570,7 +6628,7 @@ void dump_io(char *target, char *nature)
 	  n++;
 	}
 
-      free_arrayN ((void ***)list, 3);
+      free_arrayN ((void ***)list, 3); 
       
       fprintf (fp, "<environement>\n");
       fclose (fp);
@@ -7360,24 +7418,29 @@ FILE *fopenN  ( char *fname, char *mode, int max_n_tries, int delay)
 
 FILE * vfclose ( FILE *fp)
        {
-       if ( fp==NFP)return NULL;
-       if ( fp==stdout)return stdout;
-       if ( fp==stderr)return stderr;
-       if ( fp==stdin) return stdin;
-       if ( fp==NULL)return NULL;
-       else
-	 if (fclose (fp)!=0)
-	   {
-	     int a=0;
-	     
-	     while (a<10)
-	       {
-		 sleep (2);
-		 if (fclose (fp)==0)return NULL;
-		 a++;
-	       }
-	     myexit (fprintf_error ( stderr, "\nCould not close file properly [FATAL:%s]", PROGRAM));
-	   }
+	 int ecode;
+	 char error [10000];
+	 
+	 if ( fp==NFP)return NULL;
+	 if ( fp==stdout)return stdout;
+	 if ( fp==stderr)return stderr;
+	 if ( fp==stdin) return stdin;
+	 if ( fp==NULL)return NULL;
+	 else
+	   if ((ecode=fclose (fp))!=0) 
+	     {
+	       if    ( ecode==EAGAIN)sprintf ( error, "The O_NONBLOCK flag is set and output cannot be written immediately.");
+	       else if ( ecode==EBADF)sprintf (error,"The underlying file descriptor is not valid.");
+	       else if (ecode ==EFBIG) sprintf (error,"Writing to the output file would exceed the maximum file size or the process's file size supported by the implementation.");
+	       else if (ecode==EINTR) sprintf (error, "The fclose() function was interrupted by a signal before it had written any output.");
+	       else if (ecode==EIO) sprintf (error, "The process is in a background process group and is attempting to write to its controlling terminal, but TOSTOP (defined in the termio.h include file) is set, the process is neither ignoring nor blocking SIGTTOU signals, and the process group of the process is orphaned.");
+	       else if (ecode==ENOSPC) sprintf (error, "There is no free space left on the output device");
+	       else if (ecode==ENXIO) sprintf (error, "A request was made of a nonexistent device, or the request was outside the device.");
+	       else if (ecode==EPIPE) sprintf (error, "fclose() is trying to write to a pipe or FIFO that is not open for reading by any process. This error also generates a SIGPIPE signal");
+	       else sprintf (error, "unknown error code for fclose [%d]", ecode);
+	       valgrind_test();
+	       myexit (fprintf_error ( stderr, "\nCould not close file properly [%s][FATAL:%s]", error,PROGRAM));
+	     }
        NopenF--;
        return NULL;
        }
@@ -11126,3 +11189,16 @@ double km_kmeans_bs (double **data, int n, int dim, int k,double t, double **cen
    
   exit (0);
 }
+static int verbose_mode=1;
+int set_verbose(int mode)
+{
+  //0: quiet
+  //1: verbose
+  //2: pedantic
+  verbose_mode=mode;
+}
+int verbose()
+{
+  return verbose_mode;
+}
+

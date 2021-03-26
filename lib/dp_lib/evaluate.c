@@ -642,7 +642,8 @@ Alignment * fork_triplet_coffee_evaluate_output ( Alignment *IN,Constraint_list 
 Alignment * nfork_triplet_coffee_evaluate_output ( Alignment *IN,Constraint_list *CL);
 Alignment * triplet_coffee_evaluate_output ( Alignment *IN,Constraint_list *CL)  
 {
-  
+  //This is where score_ascii is taking place when evaluation_mode is set to triplet
+
 
   if (!IN || !CL || !CL->residue_index) return IN;
   
@@ -743,6 +744,7 @@ Alignment * fork_triplet_coffee_evaluate_output ( Alignment *IN,Constraint_list 
 			    }
 			}
 		      res=(max_res==0)?NO_COLOR_RESIDUE:((score_res*10)/max_res);
+		      
 		      //res=(res==NO_COLOR_RESIDUE)?res:(MIN(res,9));
 		      res=MIN(res,9);
 		      fprintf ( fp, "%d ", res);
@@ -830,8 +832,7 @@ Alignment * nfork_triplet_coffee_evaluate_output ( Alignment *IN,Constraint_list
       int s1,r1,s2,r2,w2,s3,r3,w3;
       int **lu;
       
-
-      
+            
       OUT=copy_aln (IN, OUT);
       pos=aln2pos_simple(IN, IN->nseq);
       sprintf ( OUT->name[IN->nseq], "cons");
@@ -889,6 +890,9 @@ Alignment * nfork_triplet_coffee_evaluate_output ( Alignment *IN,Constraint_list
 		    }
 		}
 	      res=(max_res==0)?NO_COLOR_RESIDUE:((score_res*10)/max_res);
+	     
+
+	      
 	      //res=(res==NO_COLOR_RESIDUE)?res:(MIN(res,9));
 	      res=MIN(res,9);
 	      OUT->seq_al[b][a]=res;
@@ -900,10 +904,12 @@ Alignment * nfork_triplet_coffee_evaluate_output ( Alignment *IN,Constraint_list
 	      if (r1>0)lu[s1][r1]=0;
 	    }
 	  
-	  res=(max_col==0)?NO_COLOR_RESIDUE:((score_col*10)/max_col);	
+	  res=(max_col==0)?NO_COLOR_RESIDUE:((score_col*10)/max_col);
+	  
 	  //res=(res==NO_COLOR_RESIDUE)?res:(MIN(res,9));
 	  res=MIN(res,9);
 	  OUT->seq_al[IN->nseq][a]=res;
+	  
 	}
       fprintf ( stderr, "\n");
       
@@ -1685,15 +1691,19 @@ char *shuffle_seq_file(char *file)
   
   return file;
 }
-
+//Does not work ye. Meant to estimate the tree from unaligned structures
+//Like a guide tree estimation but from structures
 Alignment *struc_evaluate4tcoffee4gt (Alignment *A, Constraint_list *CL, char *mode, float imaxD, int enb,char *in_matrix_name)
 {
   int a, b;
-  Alignment *B;
+  Alignment *B, *C, *TT;
   Sequence *S=CL->S;
   int n;
   int tot=(A->nseq*(A->nseq-1))/2;
-  
+  FILE *fp;
+  int ml, s1, s2;
+  char *TTF=vtmpnam (NULL);
+  cputenv ("GUIDETREE=1");
   A->dm=declare_double (A->nseq, A->nseq);
   for ( n=0,a=0; a<A->nseq-1; a++)
     for ( b=a+1; b<A->nseq; b++, n++)
@@ -1701,63 +1711,170 @@ Alignment *struc_evaluate4tcoffee4gt (Alignment *A, Constraint_list *CL, char *m
 	B=align_two_sequences (S->seq[a], S->seq[b], "pam250mt", -10, -2, "myers_miller_pair_wise");
 	B->name[0]=csprintf (B->name[0], "%s", S->name[a]);
 	B->name[1]=csprintf (B->name[1], "%s", S->name[b]);
-	if (B->nseq<2)
-	  {
-	    HERE ("OUPS: %s %s", S->name[a],S->name[b]);
-	  }
-	else 
-	  {
-	    HERE ("%d %d", n, tot);
-	  }
-	B=struc_evaluate4tcoffee (B,CL, mode,imaxD,enb,in_matrix_name);
-	A->dm[a][b]=B->dm[0][1];
-	A->dm[b][a]=B->dm[1][0];
-	//output_completion (stderr,n,tot,1, "Guide Tree Computation");
-	
+	C=struc_evaluate4tcoffee (B,CL, mode,imaxD,enb,in_matrix_name);
+	A->dm[a][b]=C->dm[0][1];
+	A->dm[b][a]=C->dm[1][0];
+
+	output_completion (stderr,n,tot,1, "Guide Tree Computation");
 	free_aln (B);
+	free_aln (C);
       }
-  return A;
+  TT=A->Tree=declare_aln2 (1,0);
+  TT->dmF_list=(char**)vcalloc (1, sizeof (char*));
+  if (A->nseq>2)dist2nj_tree (A->dm, A->name, A->nseq, TTF);
+  (TT)->seq_al[0]=file2string(TTF);
+  
+  
+  fp=vfopen (TT->dmF_list[0]=vtmpnam (NULL), "w");
+  for (ml=0,s1=0; s1<A->nseq; s1++)ml=MAX((strlen (A->name[s1])),ml);
+  fprintf ( fp, "%d \n", A->nseq);
+  for ( s1=0; s1<A->nseq;s1++)
+     {
+       fprintf (fp, "%-*.*s ", ml,ml,A->name[s1]);
+       for (s2=0; s2<A->nseq; s2++)
+	 fprintf (fp, "%6.3f ", (float)((double)A->dm[s1][s2])/(float)100);
+       fprintf (fp, "\n");
+     }
+   fprintf ( fp, "\n");
+   vfclose (fp);
+   TT->nseq=1;
+   free_double (A->dm, -1); A->dm=NULL;
+   
+   return A;
 }
-    
+
+float tune_imaxD (Alignment *A, Constraint_list *CL, char *mode, float imaxD, int enb,char *in_matrix_name);
+float tune_imaxD (Alignment *A, Constraint_list *CL, char *mode, float scan3D_max, int enb,char *in_matrix_name)
+{
+  NT_node RT, T;
+  float rf, brf,bimaxD;
+  int a, b,c;
+  Sequence *S=aln2seq(A);
+  Alignment *B;
+  int scan3D_min=5;
+  
+ 
+
+  buffer_env ("REPLICATES_4_TCOFFEE");
+  cputenv("REPLICATES_4_TCOFFEE=1");
+
+  if (!getenv ("REFERENCE_TREE"))
+    {
+      RT= compute_cw_tree(A);
+      fprintf ( stderr, "\n!#ref_tree= [cw] -- %s;",tree2string (RT));
+    }
+  else if ( getenv ("REFERENCE_TREE") && isfile(getenv ("REFERENCE_TREE")))
+    {
+      RT=main_read_tree (getenv ("REFERENCE_TREE"));
+      fprintf ( stderr, "\n!#ref_tree=%s", getenv ("REFERENCE_TREE"));
+    }
+  else
+    {
+      RT= compute_cw_tree(A);
+      vfclose (tree2file (RT, S, "newick",vfopen(getenv ("REFERENCE_TREE"), "w")));
+      fprintf ( stderr, "\n!#ref_tree=%s [cw]", getenv ("REFERENCE_TREE"));
+    }
+	  
+  fprintf ( stderr, "\n!#scan3D_max=%.2f", scan3D_max);
+
+
+  bimaxD=0;
+  brf=0;
+  
+  for (a=scan3D_min; a<scan3D_max; a++)
+    {
+      int process=1;
+      B=struc_evaluate4tcoffee(A,CL, mode, (float)a, enb, in_matrix_name);
+
+      for (b=0; b<A->nseq; b++)
+	{
+	  for (c=0; c<A->nseq; c++)
+	    if (B->dm[b][c]<-99)
+	      {
+		b=A->nseq;
+		c=A->nseq;
+		process=0;
+	      }
+	}
+      
+      
+      B=B->A;
+      if (A->Tree && (A->Tree)->seq_al && (A->Tree)->seq_al[0])
+	{
+	  if (process)
+	    {
+	      T=newick_string2tree((A->Tree)->seq_al[0]);
+	      rf=simple_tree_cmp(RT,T, S, 1);
+	      free_tree(T);
+	      fprintf ( stderr, "\n!# Threshold = %3d Angstrom ==> %6.2f %% Similiarity with ref_tree", a, rf) ;
+	      if ( rf>brf)
+		{
+		  brf=rf;
+		  bimaxD=(float)a;
+		}
+	    }
+	  else
+	    {
+	      fprintf ( stderr, "\n!# Threshold = %3d Angstrom ==> Missing Values in the distance matrix", a) ;
+	    }
+	  free_aln (A->Tree); A->Tree=NULL;
+	}     
+    }
+  if (brf>0)
+    {
+      fprintf ( stderr, "\n!# Optimal Threshold: %d Angstrom  ==> %.2f %% RF similarity with ref_tree\n", (int)bimaxD, brf);
+    }
+  else
+    {
+      bimaxD=150000;
+      fprintf ( stderr, "\n!# WARNING -- Missing Values -- Could not find any suitable threshold - Use max value %d Angstrom -use a higher value for scan3D_max ", (int)bimaxD);
+    }
+  restore_env ("REPLICATES_4_TCOFFEE");
+
+ 
+  free_sequence (S,-1);
+  return bimaxD;
+}
+	
+
+	
+
 
 Alignment *struc_evaluate4tcoffee (Alignment *A, Constraint_list *CL, char *mode, float imaxD, int enb,char *in_matrix_name)
 {
-  double **max_pw_sc;
-  double **tot_pw_sc;
-  double **max_res_sc;
-  double **tot_res_sc;
-  double *max_seq_sc;
-  double *tot_seq_sc;
+  double **max_pw_sc=NULL;
+  double **tot_pw_sc=NULL;
+  double **max_res_sc=NULL;
+  double **tot_res_sc=NULL;
+  double *max_seq_sc=NULL;
+  double *tot_seq_sc=NULL;
   
-  double **max_seq_rsc;
-  double **tot_seq_rsc;
+  double **max_seq_rsc=NULL;
+  double **tot_seq_rsc=NULL;
   
   int randstrike=1;
-  double **max_seq_randsc;
-  double **tot_seq_randsc;
+  double **max_seq_randsc=NULL;
+  double **tot_seq_randsc=NULL;
   
-  double **max_seq_brsc;
-  double **tot_seq_brsc;
+  double **max_seq_brsc=NULL;
+  double **tot_seq_brsc=NULL;
   
-
-  double *gscore;
- 
-  double *max_col_sc;
-  double *tot_col_sc;
+  double *max_col_sc=NULL;
+  double *tot_col_sc=NULL;
   
   double tot_sc=0;
   double max_sc=0;
 
-  double *tot_rsc;
-  double *max_rsc;
+  double *tot_rsc=NULL;
+  double *max_rsc=NULL;
   
-  double *tot_randsc;
-  double *max_randsc;
+  double *tot_randsc=NULL;
+  double *max_randsc=NULL;
 
-  double *tot_brsc;
-  double *max_brsc;
+  double *tot_brsc=NULL;
+  double *max_brsc=NULL;
 
-  Alignment *OUT, *T;
+  Alignment *OUT, *TREEA;
   Sequence *S=NULL;
   int replicates;
   
@@ -1781,23 +1898,31 @@ Alignment *struc_evaluate4tcoffee (Alignment *A, Constraint_list *CL, char *mode
   int **InColPair=NULL;
   int **  ColPair=NULL;
   int n_col_pair;
-
+  int scan3D_max;
+  int *used_sites;
+  int nsites=0;
+  int print_nsites=(getenv ("PRINT_NSITES")?1:0);
+  
   //receives an alignment and a constraint list file in which contacts are declared
   //can produce scores, trees and score caches to colr MSAs
-
- 
+   
   if (!A) return A;
   
-  //Get arguments passed via environement
-  if (getenv ("TREE_GAP_4_TCOFFEE"))
+  if (getenv ("scan3D"))
     {
-      max_gap  =atofgetenv("TREE_GAP_4_TCOFFEE");
+      scan3D_max=atoigetenv("scan3D");
+      unsetenv ("scan3D");
+      imaxD=tune_imaxD(A,CL,mode,(float)scan3D_max,enb,in_matrix_name);//Scan to maximize fit to some pre-defined 3D tree
     }
+  
+  //Get arguments passed via environement
+  if (getenv ("TREE_GAP_4_TCOFFEE")){max_gap  =atofgetenv("TREE_GAP_4_TCOFFEE");}
   else max_gap=0.5;
   
   if (getenv ("TREE_MODE_4_TCOFFEE"))tree_mode=getenv("TREE_MODE_4_TCOFFEE");
   else tree_mode="nj";
     
+  
   if (getenv ("REPLICATES_4_TCOFFEE"))
     {
       if ( strm (getenv ("REPLICATES_4_TCOFFEE"), "columns"))
@@ -1820,17 +1945,14 @@ Alignment *struc_evaluate4tcoffee (Alignment *A, Constraint_list *CL, char *mode
   if (!mode || strm (mode, "strike"))modeM=strikeM;
   else if (strm (mode, "distances"))modeM=distancesM;
   else if (strm (mode, "contacts"))modeM=contactsM;
-  else 	
-    {
-      printf_exit ( EXIT_FAILURE,stderr, "\nERROR: struc_evaluate4tcoffe::mode %s is unknown", (mode)?mode:"unset");
-    }
+  else {printf_exit ( EXIT_FAILURE,stderr, "\nERROR: struc_evaluate4tcoffe::mode %s is unknown", (mode)?mode:"unset");}
   
  
 
   //identify sequences with contact information
   //1-make sure the sequence is in the lib
   //2-make sure the contact library is not empty
-  rseq=(int*)vcalloc (A->nseq, sizeof (int));
+  rseq=(int*)vcalloc (A->nseq, sizeof (int));//freed
   for (NseqWithC=0,s1=0; s1<A->nseq; s1++)
     {
       rseq[s1]=name_is_in_list (A->name[s1], S->name, S->nseq, MAXNAMES);
@@ -1871,40 +1993,49 @@ Alignment *struc_evaluate4tcoffee (Alignment *A, Constraint_list *CL, char *mode
   //Prepare the evlauation information
   
   
-  max_res_sc=declare_double (A->nseq, A->len_aln);
-  tot_res_sc=declare_double (A->nseq, A->len_aln);
+  max_res_sc=declare_double (A->nseq, A->len_aln);//freed
+  tot_res_sc=declare_double (A->nseq, A->len_aln);//freed
   
-  max_seq_sc=(double*)vcalloc (A->nseq, sizeof (double));
-  tot_seq_sc=(double*)vcalloc (A->nseq, sizeof (double));
-
+  max_seq_sc=(double*)vcalloc (A->nseq, sizeof (double));//freed
+  tot_seq_sc=(double*)vcalloc (A->nseq, sizeof (double));//freed
+  
 
   //Raw STRIKE
-  max_seq_rsc=(double**)declare_arrayN (2,sizeof (double),A->nseq+1,A->nseq+1);
-  tot_seq_rsc=(double**)declare_arrayN (2,sizeof (double),A->nseq+1,A->nseq+1);
+  max_seq_rsc=(double**)declare_arrayN (2,sizeof (double),A->nseq+1,A->nseq+1);//freed
+  tot_seq_rsc=(double**)declare_arrayN (2,sizeof (double),A->nseq+1,A->nseq+1);//freed
   max_rsc=(double*)vcalloc (A->nseq+1, sizeof (double));
   tot_rsc=(double*)vcalloc (A->nseq+1, sizeof (double));  
 
-  max_seq_randsc=(double**)declare_arrayN (2,sizeof (double),A->nseq+1,A->nseq+1);
-  tot_seq_randsc=(double**)declare_arrayN (2,sizeof (double),A->nseq+1,A->nseq+1);
-  max_randsc=(double*)vcalloc (A->nseq+1, sizeof (double));
-  tot_randsc=(double*)vcalloc (A->nseq+1, sizeof (double));  
+  max_seq_randsc=(double**)declare_arrayN (2,sizeof (double),A->nseq+1,A->nseq+1);//freed
+  tot_seq_randsc=(double**)declare_arrayN (2,sizeof (double),A->nseq+1,A->nseq+1);//freed
+  max_randsc=(double*)vcalloc (A->nseq+1, sizeof (double));//freed
+  tot_randsc=(double*)vcalloc (A->nseq+1, sizeof (double));//freed  
   
   
-  max_seq_brsc=(double**)declare_arrayN (2,sizeof (double),A->nseq+1,A->nseq+1);
-  tot_seq_brsc=(double**)declare_arrayN (2,sizeof (double),A->nseq+1,A->nseq+1);
-  max_brsc=(double*)vcalloc (A->nseq+1, sizeof (double));
-  tot_brsc=(double*)vcalloc (A->nseq+1, sizeof (double));  			       
-  
-
+  max_seq_brsc=(double**)declare_arrayN (2,sizeof (double),A->nseq+1,A->nseq+1);//freed
+  tot_seq_brsc=(double**)declare_arrayN (2,sizeof (double),A->nseq+1,A->nseq+1);//freed
+  max_brsc=(double*)vcalloc (A->nseq+1, sizeof (double));//freed
+  tot_brsc=(double*)vcalloc (A->nseq+1, sizeof (double));//freed			       
   
 
-  max_col_sc=(double*)vcalloc (A->len_aln, sizeof (double));
-  tot_col_sc=(double*)vcalloc (A->len_aln, sizeof (double));
+  
+
+  max_col_sc=(double*)vcalloc (A->len_aln, sizeof (double));//freed
+  tot_col_sc=(double*)vcalloc (A->len_aln, sizeof (double));//freed
+  used_sites=(int*)vcalloc (A->len_aln, sizeof (int*));//freed
   
   max_sc=0;
   tot_sc=0;
  
-  //Set the right evlaution matrix for proteins or RNA
+  //Prepare the gap cache
+  nlen_aln=0;
+  used_col=(int*)vcalloc (A->len_aln, sizeof (int));//freed
+  col_lu=(int*)vcalloc (A->len_aln, sizeof (int)); //freed
+  
+  
+
+
+  //Set the right evaluation matrix for proteins or RNA
   if (modeM==strikeM)
     {
       matrix_name=(char*)vcalloc ((strlen(in_matrix_name)+2), sizeof (char));
@@ -1932,11 +2063,11 @@ Alignment *struc_evaluate4tcoffee (Alignment *A, Constraint_list *CL, char *mode
       matrix=NULL;
     }
  
-  dm1=declare_int (A->len_aln, A->len_aln);
-  dm2=declare_int (A->len_aln, A->len_aln);
+  dm1=declare_int (A->len_aln, A->len_aln);//freed
+  dm2=declare_int (A->len_aln, A->len_aln);//freed
   
-  pos=aln2pos_simple (A, A->nseq);
-  lu=declare_int (A->nseq, A->len_aln);
+  pos=aln2pos_simple (A, A->nseq);//freed
+  lu=declare_int (A->nseq, A->len_aln);//freed
   for (s1=0; s1<A->nseq; s1++)
     {
       for (c=0,c1=0; c1<A->len_aln; c1++)
@@ -1955,14 +2086,9 @@ Alignment *struc_evaluate4tcoffee (Alignment *A, Constraint_list *CL, char *mode
   else lowD=highD;
   for (nd=0,maxD=lowD;maxD<=highD; maxD+=100, nd++);
   
-  
+    
 
-  //Prepare the gap cache
-  nlen_aln=0;
-  used_col=(int*)vcalloc (A->len_aln, sizeof (int));
-  col_lu=(int*)vcalloc (A->len_aln, sizeof (int));
   
-
   
   for (c1=0; c1<A->len_aln; c1++)
     {
@@ -1978,8 +2104,8 @@ Alignment *struc_evaluate4tcoffee (Alignment *A, Constraint_list *CL, char *mode
   if (replicates>=1)
     {
       tree=1;
-      max_pw_sc=declare_double (A->nseq, A->nseq);
-      tot_pw_sc=declare_double (A->nseq, A->nseq);
+      max_pw_sc=declare_double (A->nseq, A->nseq);//freed
+      tot_pw_sc=declare_double (A->nseq, A->nseq);//freed
       if (use_columns)replicates=nlen_aln;
       
     }
@@ -1991,12 +2117,15 @@ Alignment *struc_evaluate4tcoffee (Alignment *A, Constraint_list *CL, char *mode
     }
 
 
-  //Importnat:: This i where replicates=1 prevents the computation of 1 replicate
+  //Important:: This is where replicates=1 prevents the computation of 1 replicate
   if (replicates==1){ntrees=nd;replicates=0;}
   else ntrees=nd*(replicates+1);
   
-  if (!A->Tree)T=A->Tree=declare_aln2(ntrees,0);
-  T->RepColList=declare_int  (ntrees, ((use_columns)?2:nlen_aln)+1);
+  if (!A->Tree)
+    {
+      TREEA=A->Tree=declare_aln2(ntrees,0);
+    }
+  TREEA->RepColList=declare_int  (ntrees, ((use_columns)?2:nlen_aln)+1);
   
   
   InColPair=NULL;
@@ -2033,8 +2162,7 @@ Alignment *struc_evaluate4tcoffee (Alignment *A, Constraint_list *CL, char *mode
   for (maxD=lowD; maxD<=highD;maxD+=100) 
     {
 
-      T->dmF_list=(char**)vcalloc (replicates+1, sizeof (char*));
-      
+      TREEA->dmF_list=(char**)vcalloc (replicates+1, sizeof (char*));
       for (rep=0; rep<=replicates; rep++)
 	{
 	  FILE *fp;
@@ -2042,8 +2170,8 @@ Alignment *struc_evaluate4tcoffee (Alignment *A, Constraint_list *CL, char *mode
 	  if (use_columns)
 	    {
 	      nlen_aln1=1;
-	      T->RepColList[rep][0]=used_col[rep];
-	      T->RepColList[rep][1]=-1;
+	      TREEA->RepColList[rep][0]=used_col[rep];
+	      TREEA->RepColList[rep][1]=-1;
 	    }
 	  else if (InColPair)
 	    {
@@ -2065,21 +2193,21 @@ Alignment *struc_evaluate4tcoffee (Alignment *A, Constraint_list *CL, char *mode
 	      nlen_aln1=nlen_aln;
 	      for (c1=0; c1<nlen_aln; c1++)
 		{
-		  if (rep>0)T->RepColList[rep][c1]=used_col[(int)rand()%nlen_aln];
-		  else T->RepColList[rep][c1]=used_col[c1];
+		  if (rep>0)TREEA->RepColList[rep][c1]=used_col[(int)rand()%nlen_aln];
+		  else TREEA->RepColList[rep][c1]=used_col[c1];
 		}
-	      T->RepColList[rep][c1]=-1;
-	      if (getenv("BS_SQRLEN") && rep>1)T->RepColList[rep][(int)sqrt((double)nlen_aln)]=-1;
+	      TREEA->RepColList[rep][c1]=-1;
+	      if (getenv("BS_SQRLEN") && rep>1)TREEA->RepColList[rep][(int)sqrt((double)nlen_aln)]=-1;
 	      
 	      ic1=0;
-	      while (T->RepColList[rep][ic1]!=-1)
+	      while (TREEA->RepColList[rep][ic1]!=-1)
 		{
 		  int ic2=0;
 		  
-		  while (T->RepColList[rep][ic2]!=-1)
+		  while (TREEA->RepColList[rep][ic2]!=-1)
 		    {
-		      ColPair[ncp][0]=T->RepColList[rep][ic1];
-		      ColPair[ncp][1]=T->RepColList[rep][ic2];
+		      ColPair[ncp][0]=TREEA->RepColList[rep][ic1];
+		      ColPair[ncp][1]=TREEA->RepColList[rep][ic2];
 		      ncp++;
 		      ic2++;
 		    }
@@ -2095,8 +2223,11 @@ Alignment *struc_evaluate4tcoffee (Alignment *A, Constraint_list *CL, char *mode
 	    int ls1=rseq[s1];
 	    int s2_has_contacts=0;
 	    
-	    if (ls1==-1)continue;//Means the sequence has no contac; OK with Strike
-	    
+	    if (ls1==-1)
+	      {
+		HERE ("NO CONTACT");
+		continue;//Means the sequence has no contac; OK with Strike
+	      }
 	    
 	    for (r1=1;r1<=S->len[ls1]; r1++)
 	      {
@@ -2150,8 +2281,7 @@ Alignment *struc_evaluate4tcoffee (Alignment *A, Constraint_list *CL, char *mode
 		//Fine if S2 has no structure for strike
 		if (modeM!=strikeM && !s2_has_contacts)continue;
 
-		//Now do the all against all
-		
+		//Now do the all against all		
 
 		ic1=0;
 		
@@ -2293,7 +2423,8 @@ Alignment *struc_evaluate4tcoffee (Alignment *A, Constraint_list *CL, char *mode
 			   in=we;
 			   sc=pow(sc,distance_modeE)*we;
 			   
-			   
+			   used_sites[c1]=1;
+			   used_sites[c2]=1;
 			 }
 		   else if (modeM==contactsM)
 		     {
@@ -2390,89 +2521,113 @@ Alignment *struc_evaluate4tcoffee (Alignment *A, Constraint_list *CL, char *mode
 		   max_randsc[A->nseq]+=in;
 		   tot_randsc[A->nseq]+=randsc;
 		  }
+		
 		for (c1=0; c1<A->len_aln; c1++)for (c2=0; c2<A->len_aln; c2++)dm2[c1][c2]=0;
 	      }
 	    for (c1=0; c1<A->len_aln; c1++)for (c2=0; c2<A->len_aln; c2++)dm1[c1][c2]=0;
 	    }
-	  	 
-	  //Estimate Phylogenetic Tree Replicates
-	  if (tree)
+	  //Report the number of used columns
+	  
+	  for (nsites=0,c1=0; c1<A->len_aln; c1++)
 	    {
-	    static char *treeF=vtmpnam (NULL);
-	    static int ml;
+	      nsites+=used_sites[c1];
+	      used_sites[c1]=0;
+	    }
+	  
+	  //Estimate Phylogenetic Tree Replicates
 
-	    //Get length of longuest name;
-	    if (!ml)
-	      {
-		for (s1=0; s1<A->nseq; s1++)ml=MAX((strlen (A->name[s1])),ml);
-	      }
-	    
-	    if (A->nseq>2)output_completion (stderr,T->nseq,ntrees,1, "Distance Tree Replicates");
-	    
-	    //This is where the distance between two sequences gets turned into a % between 0 and a 100. 0: very similar, 100 maximal relative distance
-	    for (s1=0; s1<A->nseq; s1++)
+	  
+
+	  //This is where the distance between two sequences gets turned into a % between 0 and a 100. 0: very similar, 100 maximal relative distance, -100 missing value
+	  
+
+	  for (s1=0; s1<A->nseq; s1++)
 	      {
 		for (s2=0; s2<A->nseq; s2++)
 		  {
 		    if (s1==s2)tot_pw_sc[s1][s2]=0;
-		    else if (max_pw_sc[s1][s2]>0.000000001)
+		    else if (max_pw_sc[s1][s2]>MY_EPSILON)
 		      {
 			tot_pw_sc[s1][s2]/=max_pw_sc[s1][s2];
 			tot_pw_sc[s1][s2]=(double)100*((double)1-tot_pw_sc[s1][s2]);
 		      }
 		    else
 		      {
-			tot_pw_sc[s1][s2]=-100;
+		      tot_pw_sc[s1][s2]=-100;
 		      }
 		  }
 	      }
-	    if (A->nseq>2)
+	  
+	  if (tree)
+	    {
+	    static char *treeF=vtmpnam (NULL);
+	    static int ml;
+
+	    if (!getenv ("GUIDETREE"))
 	      {
-		if (strm (tree_mode, "nj"))
-		  dist2nj_tree (tot_pw_sc, A->name, A->nseq, treeF);
-		else if ( strm (tree_mode, "upgma"))
-		  dist2upgma_tree (tot_pw_sc, A->name, A->nseq, treeF);
-		else
-		  printf_exit ( EXIT_FAILURE,stderr, "\nERROR: %s is not a known tree_mode[FATAL]",tree_mode);
+		//Get length of longuest name;
+		if (!ml)for (s1=0; s1<A->nseq; s1++)ml=MAX((strlen (A->name[s1])),ml);
 		
-		T->seq_al[T->nseq]=file2string(treeF);
-	      }
-	    sprintf (T->name[T->nseq], "%d",T->nseq); 
-	    
-	    fp=vfopen (T->dmF_list[T->nseq]=vtmpnam (NULL), "w");
-	    fprintf ( fp, "%d \n", A->nseq);
-	    for ( s1=0; s1<A->nseq;s1++)
-	      {
-		fprintf (fp, "%-*.*s ", ml,ml,A->name[s1]);
-		for (s2=0; s2<A->nseq; s2++)
-		  fprintf (fp, "%6.3f ", (float)((double)tot_pw_sc[s1][s2])/(float)100);
-		fprintf (fp, "\n");
-	      }
-	    fprintf ( fp, "\n");
-	    
-	    
-	    vfclose (fp);
-	    T->nseq++;
-	    
-	    
-	    if (T->nseq<ntrees)
-	      {
-		for (s1=0; s1<A->nseq; s1++)
+		if (A->nseq>2 && ntrees>1)output_completion (stderr,TREEA->nseq,ntrees,1, "Distance Tree Replicates");
+		
+		if (A->nseq>2)
 		  {
-		    max_seq_sc[s1]=tot_seq_sc[s1]=0;
-		    for (c1=0; c1<A->len_aln; c1++)
-		      max_res_sc[s1][c1]=tot_res_sc[s1][c1]=0;
+		    if (strm (tree_mode, "nj"))
+		      dist2nj_tree (tot_pw_sc, A->name, A->nseq, treeF);
+		    else if ( strm (tree_mode, "upgma"))
+		      dist2upgma_tree (tot_pw_sc, A->name, A->nseq, treeF);
+		    else
+		      printf_exit ( EXIT_FAILURE,stderr, "\nERROR: %s is not a known tree_mode[FATAL]",tree_mode);
 		    
-		    for (s2=0; s2<A->nseq; s2++)
-		      max_pw_sc[s1][s2]=tot_pw_sc[s1][s2]=0;
+		    TREEA->seq_al[TREEA->nseq]=file2string(treeF);
+		    
+		    
 		  }
-		for (c1=0; c1<A->len_aln; c1++)max_col_sc[c1]=tot_col_sc[c1]=0;
+		sprintf (TREEA->name[TREEA->nseq], "%d",TREEA->nseq); 	    
+		fp=vfopen (TREEA->dmF_list[TREEA->nseq]=vtmpnam (NULL), "w");
+		
+		if (print_nsites)fprintf (fp, "# NSITES: %d\n", nsites);
+		fprintf ( fp, "%d \n", A->nseq);
+		for ( s1=0; s1<A->nseq;s1++)
+		  {
+		    fprintf (fp, "%-*.*s ", ml,ml,A->name[s1]);
+		    for (s2=0; s2<A->nseq; s2++)
+		      fprintf (fp, "%6.3f ", (float)((double)tot_pw_sc[s1][s2])/(float)100);
+		    fprintf (fp, "\n");
+		  }
+		fprintf ( fp, "\n");
+		
+		
+		vfclose (fp);
+		TREEA->nseq++;
+		
+		if (TREEA->nseq<ntrees)
+		  {
+		    for (s1=0; s1<A->nseq; s1++)
+		      {
+			max_seq_sc[s1]=tot_seq_sc[s1]=0;
+			for (c1=0; c1<A->len_aln; c1++)
+			  max_res_sc[s1][c1]=tot_res_sc[s1][c1]=0;
+			
+			for (s2=0; s2<A->nseq; s2++)
+			  max_pw_sc[s1][s2]=tot_pw_sc[s1][s2]=0;
+		      }
+		    for (c1=0; c1<A->len_aln; c1++)max_col_sc[c1]=tot_col_sc[c1]=0;
+		  }
+		else 
+		  {
+		    OUT->nsites=nsites;
+		    OUT->dm=tot_pw_sc;
+		    tot_pw_sc=NULL;
+		  }
 	      }
-	    else 
+	    else
 	      {
+		OUT->nsites=nsites;
 		OUT->dm=tot_pw_sc;
+		tot_pw_sc=NULL;
 	      }
-	    
+		
 	    }
 	}
       free_arrayN ((void **) ColPair, 2);
@@ -2569,7 +2724,7 @@ Alignment *struc_evaluate4tcoffee (Alignment *A, Constraint_list *CL, char *mode
 
   //compute bs_score
   
-  if (tree)fprintf (stderr, "\n");
+  if (tree && ntrees>1)fprintf (stderr, "\n");
   
   
   
@@ -2606,31 +2761,54 @@ Alignment *struc_evaluate4tcoffee (Alignment *A, Constraint_list *CL, char *mode
 
   A->score=A->score_aln=OUT->score=OUT->score_aln=(int)(max_sc==0)?0:(tot_sc*1000)/max_sc;
   
-			     
-  free_int (lu,  -1);
+  
+  free_double (max_res_sc, -1);  
+  free_double (tot_res_sc, -1);
+    
+  vfree (max_seq_sc);
+  vfree (tot_seq_sc);
+  
+  free_arrayN ((void**)max_seq_rsc,2);
+  free_arrayN ((void**)tot_seq_rsc,2);
+  vfree (max_rsc);
+  vfree (tot_rsc);
+  
+
+  free_arrayN ((void**)max_seq_randsc,2);
+  free_arrayN ((void**)tot_seq_randsc,2);
+  vfree (max_randsc);
+  vfree (tot_randsc);
+  free_arrayN ((void**)max_seq_brsc,2);
+  free_arrayN ((void**)tot_seq_brsc,2);
+  vfree (max_brsc);
+  vfree (tot_brsc);
+  
+  vfree (max_col_sc);
+  vfree (tot_col_sc);
+  vfree (used_sites);
+  
+  vfree (used_col);
+  vfree(col_lu);
+  
   free_int (dm1, -1);
   free_int (dm2, -1);
-  free_double (tot_res_sc, -1);
-  free_double (max_res_sc, -1);
-  if (max_pw_sc)free_double(max_pw_sc, -1);
-  vfree (tot_seq_sc);vfree (max_seq_sc);
+  free_int (pos, -1);
+  free_int (lu,  -1);
   
-  free_arrayN ((void**)tot_seq_rsc,2);
-  free_arrayN ((void**)max_seq_rsc,2);
-  vfree (max_rsc);vfree (tot_rsc);
-
-  free_arrayN ((void**)tot_seq_brsc,2);
-  free_arrayN ((void**)max_seq_brsc,2);
-  vfree (max_brsc);vfree (tot_brsc);
+  vfree (rseq);
   
-  free_arrayN ((void**)tot_seq_randsc,2);
-  free_arrayN ((void**)max_seq_randsc,2);
-  vfree (max_randsc);vfree (tot_randsc);
-	         
-  vfree (tot_col_sc);vfree (max_col_sc);
+  free_double(max_pw_sc, -1);
+  free_double(tot_pw_sc, -1);
+  
   OUT->A=A;
   return OUT;
 }   	
+
+
+
+
+
+
 
 Alignment *msa2distances (Alignment *A, Constraint_list *CL, float radius, float clus_th, int clus_min)
 {
@@ -3259,8 +3437,7 @@ Alignment * fast_coffee_evaluate_output ( Alignment *IN,Constraint_list *CL)
     int local_m;
     int local_nseq;
     
-
-
+  
     /*NORMALIZE: with the highest scoring pair found in the multiple alignment*/
    
     
