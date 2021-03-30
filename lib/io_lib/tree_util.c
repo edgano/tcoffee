@@ -7989,35 +7989,83 @@ char *kmsa2msa (KT_node K,Sequence *S, ALNcol***S2,ALNcol*start)
       vfclose (fp);
     }
   else if (strm (output, "fastaz_aln"))
-    {
+  {
+      //printf("*** INSIDE tree_util.c *** \n fastaAZ_ALN \n");
       fp=vfopen (out, "w");
       for (s=0; s<S->nseq; s++)
-	{
-	  int r=0;
-	  ALNcol*msa=start;
-	  int cg=0;
-	  
-	  output_completion (stderr,s,S->nseq, 100, "Final MSA");
-	  for (c=0; c<S->len[s]; c++)
-	    {
-	      S2[s][c]->aa=S->seq[s][c];
+      {
+        int r=0;
+        ALNcol*msa=start;
+        int cg=0;
+
+        const int bufferSize = 1024;
+        const int intSize = 256;
+        char seqAux [bufferSize]="";
+        char charValue;
+        char int2Char [intSize]="";
+        
+        output_completion (stderr,s,S->nseq, 100, "Final MSA");
+
+        for (c=0; c<S->len[s]; c++)
+          {
+            S2[s][c]->aa = S->seq[s][c];        // nucleotide
+            //printf("\n--> %c : %c",S2[s][c]->aa, S->seq[s][c]);
+          }
+        
+        fprintf (fp, ">%s\n", S->name[s]);    //  sequence name
+          //printf("\n*-> %s \n",S->name[s]);   
+        
+        while (msa->next)
+        {
+          //printf("* actual %c - %d\n",msa->aa, msa->aa);
+          if (msa->aa==0)     // is GAP
+          {
+              cg++;                         //increase gap
+              //printf("is gap %d\n",cg);
+          }
+          else if (msa->aa>0) // is NUCLEOTIDE
+          {
+            //printf("is nucle %c\n",msa->aa);
+            if (cg)     //if there is gaps to write ->
+            {
+              //printf("is nucle but gaps 2 write %c -> %d\n",msa->aa, cg);
+              sprintf(int2Char, "%d", cg);          // convert int to char to appent into the buffer
+              strcat( seqAux, int2Char);            //save the number in the buffer
+              //printf("_app Num > %s \n",seqAux);          //number ~gap
+              cg=0;
+            }
+            //else{
+              //printf("is nucle and NO gaps 2 write %c -> %d\n",msa->aa);
+              //fprintf (fp, "%c",msa->aa);
+              //printf("base : %c \n",msa->aa); 
+              charValue = msa->aa;
+              //printf("char : %c \n",charValue); 
+              strncat(seqAux, &charValue,1);      //save the nucleotide in the buffer
+              //printf("__append > %s \n",seqAux);     
+              msa->aa=0;
+            //}
+          }
+          if (strlen(seqAux)==bufferSize){              //the buffer is full -> need to be stored.
+            fprintf (fp, "%s",seqAux);
+            //printf("*-full : %s \n",seqAux);   
+            strcpy (seqAux, "");
+          }
+          msa=msa->next;
+        }
+        
+        if (cg)     //save if the last position is a GAP
+        {
+          sprintf(int2Char, "%d", cg);          // convert int to char to appent into the buffer
+          strcat( seqAux, int2Char); 
+          //printf("***> %d \n",cg);
+          cg=0;
+        }
+        fprintf (fp, "%s",seqAux);    //save and clear buffer
+        //printf("** end : %s \n",seqAux); 
+        strcpy (seqAux, "");          //save and clear buffer
+        fprintf (fp, "\n");
+        //exit(1);    // to break the execution after 1st seq
 	    }
-	  fprintf (fp, ">%s\n", S->name[s]);
-	  
-	  while (msa->next)
-	    {
-	      if (msa->aa==0){cg++;}
-	      else if (msa->aa>0) 
-		{
-		  if (cg){fprintf (fp, "%d",cg);cg=0;}
-		  fprintf (fp, "%c",msa->aa);
-		  msa->aa=0;
-		}
-	      msa=msa->next;
-	    }
-	  if (cg){fprintf (fp, "%d",cg);cg=0;}
-	  fprintf (fp, "\n");
-	}
       vfclose (fp);
     }
   else
