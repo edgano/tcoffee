@@ -7998,7 +7998,7 @@ char *kmsa2msa (KT_node K,Sequence *S, ALNcol***S2,ALNcol*start)
         ALNcol*msa=start;
         int cg=0;
 
-        const int bufferSize = 1024;
+        const int bufferSize = 4096;
         const int intSize = 256;
         char seqAux [bufferSize]="";
         char charValue;
